@@ -25,8 +25,14 @@ restauration, et entrées de boot GRUB / systemd-boot.
 ## Installation
 
 ```sh
+# 1. Cloner le dépôt
+git clone https://github.com/Julien684/btrfsmgr.git
+cd btrfsmgr
+
+# 2. Installer
 sudo ./install.sh
-# puis
+
+# 3. Utiliser
 btrfsmgr                 # gère le sous-volume /
 btrfsmgr /mnt/backup     # gère un autre sous-volume BTRFS
 ```
