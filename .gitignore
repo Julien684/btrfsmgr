@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Scratch / debug files — DO NOT publish (contain local IP, usernames, creds)
+ssh_helper.py
+sshrun.py
+sshrun_debug.py
+sshrun_dbg2.py
+h1.py
+h2.py
+h3.py
+r.py
+rel
+etal.py
+copy.py
+check_snaps.py
+test_*.py
+test_*.sh
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
