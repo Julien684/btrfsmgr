@@ -18,11 +18,13 @@ Raccourcis:
   1      Menu principal
   s      Créer un snapshot
   l      Lister les snapshots
-  p      Programmer des snapshots automatiques
   r      Restaurer un snapshot
+  d      Détruire un snapshot
+  p      Programmer des snapshots automatiques
+  x      Supprimer un timer systemd
+  i      Infos système
   m      Menu systemd-boot: afficher/masquer au démarrage
-  a      Actions sur un snapshot (supprimer, renommer...)
-  x      Quitter
+  q      Quitter
 
 Dépendances: python3 (>=3.8), btrfs-progs, systemd (pour les timers et boot)
 """
@@ -1301,10 +1303,10 @@ class TUI:
             [
                 "Créer un instantané",
                 "Lister les instantanés",
-                "Programmer des instantanés automatiques (systemd)",
-                "Supprimer une automatisation (timer systemd)",
                 "Restaurer un instantané",
                 "Détruire un instantané",
+                "Programmer des instantanés automatiques (systemd)",
+                "Supprimer une automatisation (timer systemd)",
                 "Rétention : conserver les N plus récents",
                 "Infos système (chargeur de boot, timers…)",
                 "Menu systemd-boot : afficher/masquer au démarrage",
@@ -1570,14 +1572,14 @@ class TUI:
                 self.do_create()
             elif ch in ("2", "l", "L"):
                 self.do_list()
-            elif ch in ("3", "p", "P"):
-                self.do_schedule()
-            elif ch in ("4", "x", "X"):
-                self.do_remove_timer()
-            elif ch in ("5", "r", "R"):
+            elif ch in ("3", "r", "R"):
                 self.do_restore()
-            elif ch in ("6", "a", "A", "d", "D"):
+            elif ch in ("4", "a", "A", "d", "D"):
                 self.do_delete()
+            elif ch in ("5", "p", "P"):
+                self.do_schedule()
+            elif ch in ("6", "x", "X"):
+                self.do_remove_timer()
             elif ch in ("7",):
                 self.do_retention()
             elif ch in ("8", "i", "I"):

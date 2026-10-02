@@ -46,18 +46,18 @@ Dépendances : `btrfs-progs`, `python3 ≥ 3.8`, `rsync` (restauration),
 |------|--------|
 | 1 | Créer un instantané (read-only) dans `@snapshots/` |
 | 2 | Listez les instantanés + autres sous-volumes |
-| 3 | Programmer des snapshots automatiques (timer systemd) avec planning `OnCalendar` (ex. `daily`, `weekly`, `Mon *-*-* 03:00:00`) et rétention (conserver les N plus récents, supprimer les plus anciens) |
-| 4 | Supprimer une automatisation (timer systemd) |
-| 5 | Restaurer : `rsync` vers un sous-volume, ou contenu + `btrfs subvolume set-default` pour booter dessus ensuite |
-| 6 | Détruire un instantané (un seul, plusieurs `1,3,5`, ou `tous`) |
-| 7 | Créer une entrée de boot (GRUB / systemd-boot) puis redémarrer. *(Au lancement, les entrées systemd-boot sont automatiquement resynchronisées avec les snapshots présents.)* |
-| 8 | Rétention manuelle : supprimer tous les snapshots sauf les N plus récents |
-| 9 | Infos : chargeur de boot détecté, timers actifs, espace disque |
+| 3 | Restaurer : `rsync` vers un sous-volume, ou contenu + `btrfs subvolume set-default` pour booter dessus ensuite |
+| 4 | Détruire un instantané (un seul, plusieurs `1,3,5`, ou `tous`) |
+| 5 | Programmer des snapshots automatiques (timer systemd) avec planning `OnCalendar` (ex. `daily`, `weekly`, `Mon *-*-* 03:00:00`) et rétention (conserver les N plus récents, supprimer les plus anciens) |
+| 6 | Supprimer une automatisation (timer systemd) |
+| 7 | Rétention manuelle : supprimer tous les snapshots sauf les N plus récents |
+| 8 | Infos : chargeur de boot détecté, timers actifs, espace disque |
+| 9 | Menu systemd-boot : afficher/masquer le menu au démarrage (timeout) |
 | 10 | Quitter |
 
 ## Timers systemd
 
-`btrfsmgr` crée (menu 3) :
+`btrfsmgr` crée (menu 5) :
 
 * `/etc/systemd/system/btrfsmgr-snap-<root>-<snapdir>-<tag>.service`
 * `/etc/systemd/system/btrfsmgr-snap-<root>-<snapdir>-<tag>.timer`
@@ -69,7 +69,7 @@ suppression automatique des plus anciens au-delà de N (rétention).
 Suivi : `systemctl list-timers | grep btrfsmgr`,
 `journalctl -u btrfsmgr-snap-*`.
 
-Suppression d'un plan : option 4 du TUI — liste les timers `btrfsmgr`,
+Suppression d'un plan : option 6 du TUI — liste les timers `btrfsmgr`,
 choix, puis `systemctl disable --now` + suppression des fichiers dans
 `/etc/systemd/system`.
 
@@ -115,7 +115,7 @@ restent intactes. Si le chargeur n'est pas systemd-boot (GRUB), cette
 
 ## Mode restauration « set-default »
 
-Le mode 2 du menu 5 :
+Le mode 2 du menu 3 :
 
 1. `rsync -aHAX --delete <snapshot>/ → <sous-volume courant>/`
 2. `btrfs subvolume set-default <gen> /`
