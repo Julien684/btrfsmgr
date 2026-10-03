@@ -233,6 +233,21 @@ def _subvols_by_id(root: str) -> dict:
     return m
 
 
+def _subvol_id(mount: str, name: str) -> int | None:
+    """ID numérique du sous-volume `name` (chemin relatif à la racine du
+    FS, sans slash initial) vu depuis `mount` (montage quelconque sur le
+    même FS).  None si introuvable."""
+    table = _subvols_by_id(mount)
+    rev = {v: k for k, v in table.items()}
+    val = rev.get(name)
+    if val is None:
+        return None
+    try:
+        return int(val)
+    except (ValueError, TypeError):
+        return None
+
+
 def _subvol_of_mount(mount: str, root: str) -> str | None:
     """Nom (sans slash) du sous-volume BTRFS monté sur `mount`.
 
@@ -673,46 +688,81 @@ def list_snapshots(root: str, snapdir: str = DEFAULT_SNAPDIR) -> list[dict]:
     """Snapshots de <root>/<snapdir> (snapdir au niveau racine du FS,
     monté sur <root>/<snapdir> par ensure_snapdir).
 
-    Liste depuis le snapdir lui-même (`btrfs subvolume list -s <snapdir>`):
-    les chemins retournés sont relatifs au snapdir (ex. "20260101-120000")
-    — filtre simple et fiable.  S'il n'est pas monté (premier run), on
-    passe par un montage temporaire de la racine du FS.
+    Note btrfs-progs ≥ 7.1 (comportement modifié): `btrfs subvolume list -s
+    <chemin>` ne liste plus seulement l'arbre de <chemin> — il renvoie
+    maintenant *tous* les sous-volumes du FS, avec `path` relatif à la
+    racine du FS (et non au chemin) et `top level` = l'ID du PARENT.  On
+    exploite donc ces deux propriétés: `path` devient "relatif au snapdir"
+    (strip du préfixe "snapdir/"), et le filtre tient sur `top level ==
+    ID du snapdir` (le seul parent valide pour un snapshot).  S'il n'est
+    pas monté (premier run), on passe par un montage temporaire de la
+    racine du FS (même parsing).
     """
-    snaproot = os.path.join(root, snapdir)
-    if os.path.isdir(snaproot):
-        rc, out = run(["btrfs", "subvolume", "list", "-s", snaproot],
+    snap = snapdir.strip("/")
+    # On s'appuie sur le champ `top level` (ID du PARENT du sous-volume),
+    # présent dans la sortie de `btrfs subvolume list` quel que soit le
+    # btrfs-progs: un snapshot est EXACTEMENT un sous-volume dont le
+    # parent est le snapdir.  C'est le filtre fiable, car:
+    #   - btrfs ≤ 7.0: `list -s <snapdir>` ne renvoyait que l'arbre;
+    #   - btrfs ≥ 7.1: `list -s <chemin>` renvoie TOUS les sous-volumes
+    #     du FS (path relative au chemin demandé), donc `@_save` (parent
+    #     = racine) y apparaîtrait en plus du snapshots → on doit filtrer.
+    # Le snapdir doit être monté (ensure_snapdir le fait), sinon on passe
+    # par un montage temporaire de la racine du FS.  On lit l'ID du
+    # snapdir depuis la RACINE du FS (le snapdir n'est pas listé quand on
+    # part de lui-même).
+    if os.path.isdir(os.path.join(root, snapdir)):
+        base = root
+        rc, out = run(["btrfs", "subvolume", "list", "-s", base],
                       check=False)
-        base = snaproot
-        prefix = ""
+        snapdir_id = _subvol_id(base, snap)
     else:
         with fs_root_mount(root) as r:
             p = os.path.join(r, snapdir)
             if not os.path.isdir(p):
                 return []
-            rc, out = run(["btrfs", "subvolume", "list", "-s", p],
+            rc, out = run(["btrfs", "subvolume", "list", "-s", r],
                           check=False)
-            base = p
-            prefix = ""
+            snapdir_id = _subvol_id(r, snap)
     subs = []
     if rc == 0:
         for line in out.splitlines():
             if " path " not in line:
                 continue
+            parts = line.split()
             try:
-                gen = int(line.split()[1])
+                gen = int(parts[1])
             except (IndexError, ValueError):
                 continue
+            # parent = champ `top level N` (unique sur btrfs ≥ 7.1; sur
+            # d'anciennes versions `list -s <snapdir>` n'incluait que
+            # l'arbre, donc le filtre by-id est un no-op utile).
+            top = None
+            if "top" in parts:
+                ti = parts.index("top")
+                if ti + 2 < len(parts) and parts[ti + 1] == "level":
+                    try:
+                        top = int(parts[ti + 2])
+                    except ValueError:
+                        top = None
             p = line.split(" path ", 1)[1].strip().lstrip("/")
-            # `btrfs subvolume list -s` inclut le snapdir lui-même
-            # (path = "snapshots"): ce n'est pas un snapshot.
-            if p in ("", snapdir.strip("/")):
-                continue
-            if prefix and not p.startswith(prefix):
-                continue
+            # `path` est relative au snapdir sur les deux familles de
+            # versions, mais strip défensif du préfixe "snapdir/" au cas
+            # où une version la remonterait.
+            if p.startswith(snap + "/"):
+                rel = p[len(snap) + 1:]
+            else:
+                rel = p
+            if rel == "" or rel == snap:
+                continue  # le snapdir lui-même
+            # filtre fiable: le parent DOIT être le snapdir
+            if snapdir_id is not None:
+                if top is not None and top != snapdir_id:
+                    continue
             subs.append({
                 "gen": gen,
-                "path": prefix + p,
-                "full": os.path.join(root, snapdir, p),
+                "path": rel,
+                "full": os.path.join(root, snapdir, rel),
             })
     subs.sort(key=lambda s: s["gen"])
     return subs
@@ -877,9 +927,11 @@ def restore_snapshot(root: str, snapdir: str, snap_name: str) -> int:
       1. mv  <at>        →  <snapdir>/<at>_old-<date-heure>   (sauvegarde)
       2. mv  <snapdir>/<snap>  →  <at>                        (restauration)
 
-    `<at>` est le sous-volume par défaut (ex. `@`).  Le sous-volume courant
-    est donc conservé comme snapshot daté (`snapshots/@_old-<ts>`), et le
-    snapshot choisi prend sa place et devient la racine bootable.
+    `<at>` est le sous-volume MONTÉ SUR LA RACINE SYSTÈME (le root de
+    boot, ex. `@`, `@rootfs`), pas le « default subvolume » (qui peut être
+    la racine du FS, sans nom, et n'est donc pas renommable).  Le sous-volume
+    courant est conservé comme snapshot daté (`snapshots/<at>_old-<ts>`), et
+    le snapshot choisi prend sa place et devient la racine bootable.
 
     Le montage vivant de / sur @ reste valable: un montage suit le
     sous-volume (sa superblock), pas son nom/dossier.  Les opérations se
@@ -889,12 +941,19 @@ def restore_snapshot(root: str, snapdir: str, snap_name: str) -> int:
     @ (le sous-volume restauré, rw) — donc les boots par subvol=@ *et*
     subvolid=<N> atterrissent bien sur la version restaurée.
     """
-    dv = default_subvol(root)
-    at_name = (dv.get("path") or "").strip("/")
+    # Le sous-volume à échanger est celui MONTÉ SUR LA RACINE SYSTÈME (le
+    # root de boot: @, @rootfs, @home, …), pas le « default subvolume » qui
+    # peut être la racine du FS (subvolid 5, sans nom → pas renommable).
+    at_name = _subvol_of_mount(root, root)
     if not at_name:
-        print("ERREUR: le sous-volume par défaut n'a pas de nom propre "
-              "(montage direct sur la racine du FS).  La restauration par "
-              "mv nécessite un sous-volume nommé (ex. @).")
+        # fallback: sous-volume par défaut s'il a un nom propre
+        dv = default_subvol(root)
+        at_name = (dv.get("path") or "").strip("/")
+    if not at_name:
+        print("ERREUR: aucun sous-volume nommé monté sur la racine "
+              "système (montage direct sur la racine du FS).  La "
+              "restauration par mv nécessite un sous-volume nommé "
+              "(ex. @, @rootfs).")
         return 1
 
     rel = _snaprel(snap_name)
@@ -1454,8 +1513,9 @@ class TUI:
         if not 0 <= idx < len(snaps_r):
             print("Choix invalide"); self.pause(); return
         snap = snaps_r[idx]
-        dv = default_subvol(self.root)
-        at = (dv.get("path") or "").strip("/") or "(racine du FS)"
+        at = _subvol_of_mount(self.root, self.root) \
+             or (default_subvol(self.root).get("path") or "").strip("/") \
+             or "(racine du FS)"
         self.confirm(
             f"Restaurer {snap['path']} en premier plan par deux mv (CoW) ?\n\n"
             f"  1. mv  {at} → {self.snapdir}/{at}_old-<date-heure>  (conserve l'actuel)\n"
