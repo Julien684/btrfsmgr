@@ -7,7 +7,8 @@ Fonctionnalités:
   * Lister les instantanés d'un sous-volume
   * Programmer des instantanés automatiques (timers systemd) avec
     rétention (conserver les N plus récents, supprimer les plus anciens)
-  * Restaurer un snapshot (rsync vers un sous-volume cible)
+  * Restaurer un snapshot (swap mv: le snapshot devient @, l'ancien @
+    est conservé dans snapshots/@_old-<ts>)
   * Ajouter un snapshot au boot: entrées GRUB + entrées systemd-boot
     (BtrfsSubvol=), redémarrer ou basculer sur un snapshot précis
 
@@ -868,43 +869,83 @@ def auto_snapshot(root: str, snapdir: str, name: str | None, keep: int) -> int:
 # ---------------------------------------------------------------------------
 
 
-def restore_snapshot(root: str, snapdir: str, snap_name: str,
-                     target: str) -> int:
-    src = os.path.join(root, snapdir, _snaprel(snap_name))
+def restore_snapshot(root: str, snapdir: str, snap_name: str) -> int:
+    """Restaurer un snapshot au premier plan, par **deux mv** (CoW).
+
+    Rien n'est copié: ce sont deux renommages de sous-volumes.
+
+      1. mv  <at>        →  <snapdir>/<at>_old-<date-heure>   (sauvegarde)
+      2. mv  <snapdir>/<snap>  →  <at>                        (restauration)
+
+    `<at>` est le sous-volume par défaut (ex. `@`).  Le sous-volume courant
+    est donc conservé comme snapshot daté (`snapshots/@_old-<ts>`), et le
+    snapshot choisi prend sa place et devient la racine bootable.
+
+    Le montage vivant de / sur @ reste valable: un montage suit le
+    sous-volume (sa superblock), pas son nom/dossier.  Les opérations se
+    font au niveau racine du FS (montage temporaire), où @ et <snapdir>
+    sont frères.  Le snapshot devient rw (ro levé) pour pouvoir être monté
+    en écriture et booté.  Le default subvolume est ensuite repointé sur
+    @ (le sous-volume restauré, rw) — donc les boots par subvol=@ *et*
+    subvolid=<N> atterrissent bien sur la version restaurée.
+    """
+    dv = default_subvol(root)
+    at_name = (dv.get("path") or "").strip("/")
+    if not at_name:
+        print("ERREUR: le sous-volume par défaut n'a pas de nom propre "
+              "(montage direct sur la racine du FS).  La restauration par "
+              "mv nécessite un sous-volume nommé (ex. @).")
+        return 1
+
+    rel = _snaprel(snap_name)
+    src = os.path.join(root, snapdir, rel)
     if not os.path.isdir(src):
         print(f"Snapshot introuvable: {src}")
         return 1
-    # rsync -aHAX --delete from snapshot to target
-    cmd = ["rsync", "-aHAX", "--delete", "--info=progress2",
-           src + "/", target + "/"]
-    print(f"Restauration: {src} → {target}")
-    print("(Ceci peut prendre un moment…)")
-    rc, out = run(cmd, check=False)
+
+    with fs_root_mount(root) as r:
+        at = os.path.join(r, at_name)
+        snap = os.path.join(r, snapdir, rel)
+        stamp = now_stamp()
+        old = os.path.join(r, snapdir, f"{at_name}_old-{stamp}")
+
+        if not (is_btrfs_subvolume(at) or is_ro_subvolume(at)):
+            print(f"ERREUR: sous-volume par défaut introuvable: {at}")
+            return 1
+        if not os.path.isdir(snap):
+            print(f"ERREUR: snapshot introuvable sous la racine: {snap}")
+            return 1
+        if os.path.exists(old):
+            print(f"ERREUR: {old} existe déjà")
+            return 1
+
+        print(f"Restauration: snapshots/{rel} → {at_name} "
+              f"(l'ancien {at_name} → {snapdir}/{os.path.basename(old)})")
+        # 1) écarte le sous-volume courant dans snapshots/<at>_old-<ts>
+        rc, out = run(["mv", at, old], check=False)
+        if rc != 0:
+            print(f"Échec du déplacement de {at}:\n{out.strip()}")
+            return rc
+
+        # le snapshot devenu @ doit pouvoir se monter en rw (boot)
+        run(["btrfs", "property", "set", snap, "ro", "false"], check=False)
+
+        # 2) le snapshot prend la place de l'ancien @
+        rc, out = run(["mv", snap, at], check=False)
+        if rc != 0:
+            # rollback: remettre @ à sa place, annuler le renommage
+            print("Échec du placement du snapshot — rollback…")
+            run(["mv", old, at], check=False)
+            print(out.strip())
+            return rc
+
+    rc, out = set_default_subvol(root, at_name)
     if rc != 0:
-        print("Échec restauration:", out.strip())
-        return rc
-    print("Restauration terminée.")
-    return 0
-
-
-def restore_and_set_default(root: str, snapdir: str, snap_name: str) -> int:
-    """Restaurer le contenu d'un snapshot dans le sous-volume courant
-    (rsync).  Le subvolume par défaut n'est PAS modifié: pour booter sur
-    l'état restauré, il suffit de redémarrer (le contenu de @ est déjà à
-    jour) — ou de choisir l'entrée de boot du snapshot lui-même.
-
-    Modifier le default subvolume vers un snapshot read-only rendrait le
-    système inbootable par défaut: c'est volontairement évité.
-    """
-    dv = default_subvol(root)
-    target = dv.get("full") or root
-    rc = restore_snapshot(root, snapdir, snap_name, target)
-    if rc != 0:
-        return rc
-    print(f"Contenu restauré dans {target}.")
-    print("Redémarrez si vous voulez revenir à un état propre; "
-          "l'entrée de boot du snapshot (synchronisée automatiquement) "
-          "bootera directement sur l'instantané.")
+        print(f"(avert.) défaut non repointé: {out.strip()}")
+    print(f"Restauration terminée: {rel} est désormais {at_name}.")
+    print(f"L'ancien sous-volume est conservé dans "
+          f"{snapdir}/{os.path.basename(old)}.")
+    print("Redémarrez pour booter sur la version restaurée.")
     return 0
 
 
@@ -1413,18 +1454,16 @@ class TUI:
         if not 0 <= idx < len(snaps_r):
             print("Choix invalide"); self.pause(); return
         snap = snaps_r[idx]
-        mode = self.ask("Mode de restauration: "
-                        "1=contenu seulement (rsync), "
-                        "2=contenu dans @ (prêt à booter)", "1")
-        if mode == "2":
-            self.confirm("Cela recopiera le contenu du snapshot dans @ "
-                         "(sous-volume courant).  Confirmer ?")
-            restore_and_set_default(self.root, self.snapdir, snap["path"])
-        else:
-            target = self.ask("Cible (chemin du sous-volume à restaurer)",
-                              self.root)
-            self.confirm(f"rsync {snap['full']} → {target}  (--delete !)")
-            restore_snapshot(self.root, self.snapdir, snap["path"], target)
+        dv = default_subvol(self.root)
+        at = (dv.get("path") or "").strip("/") or "(racine du FS)"
+        self.confirm(
+            f"Restaurer {snap['path']} en premier plan par deux mv (CoW) ?\n\n"
+            f"  1. mv  {at} → {self.snapdir}/{at}_old-<date-heure>  (conserve l'actuel)\n"
+            f"  2. mv  {self.snapdir}/{snap['path']} → {at}  (le snapshot devient @)\n\n"
+            f"Le sous-volume courant n'est pas perdu: il reste dans "
+            f"{self.snapdir}/.\n"
+            f"Redémarrez ensuite pour booter sur la version restaurée.")
+        restore_snapshot(self.root, self.snapdir, snap["path"])
         self.pause()
 
     def do_delete(self):

@@ -37,8 +37,10 @@ btrfsmgr                 # gère le sous-volume /
 btrfsmgr /mnt/backup     # gère un autre sous-volume BTRFS
 ```
 
-Dépendances : `btrfs-progs`, `python3 ≥ 3.8`, `rsync` (restauration),
-`systemd` (timers).
+Dépendances : `btrfs-progs`, `python3 ≥ 3.8`, `systemd` (timers).
+
+La restauration ne nécessite **ni rsync ni copie** : c'est un swap CoW
+de sous-volumes (deux `mv`).
 
 ## Fonctionnalités
 
@@ -46,7 +48,7 @@ Dépendances : `btrfs-progs`, `python3 ≥ 3.8`, `rsync` (restauration),
 |------|--------|
 | 1 | Créer un instantané (read-only) dans `@snapshots/` |
 | 2 | Listez les instantanés + autres sous-volumes |
-| 3 | Restaurer : `rsync` vers un sous-volume, ou contenu + `btrfs subvolume set-default` pour booter dessus ensuite |
+| 3 | Restaurer : swap CoW (deux `mv`) — le snapshot devient `@`, l'ancien `@` est conservé dans `snapshots/@_old-<date-heure>` (tout est CoW, rien n'est copié) |
 | 4 | Détruire un instantané (un seul, plusieurs `1,3,5`, ou `tous`) |
 | 5 | Programmer des snapshots automatiques (timer systemd) avec planning `OnCalendar` (ex. `daily`, `weekly`, `Mon *-*-* 03:00:00`) et rétention (conserver les N plus récents, supprimer les plus anciens) |
 | 6 | Supprimer une automatisation (timer systemd) |
@@ -113,14 +115,20 @@ sont concernés — les entrées d'autres outils (ex. `Solus-current-*.conf`)
 restent intactes. Si le chargeur n'est pas systemd-boot (GRUB), cette
 étape est un no-op silencieux.
 
-## Mode restauration « set-default »
+## Mode restauration « swap mv »
 
-Le mode 2 du menu 3 :
+Le menu 3 :
 
-1. `rsync -aHAX --delete <snapshot>/ → <sous-volume courant>/`
-2. `btrfs subvolume set-default <gen> /`
+1. `mv  @ → snapshots/@_old-<date-heure>`   — l'ancien sous-volume courant
+   est conservé comme snapshot daté.
+2. `mv  snapshots/<snapshot> → @`   — le snapshot choisi prend la place
+   de `@` et devient la racine bootable (flag `ro` levé).
+3. `btrfs subvolume set-default @ /`   — le default subvolume est repointé
+   sur `@` (le sous-volume restauré).
 
-Le prochain boot chargera alors le sous-volume restauré.
+Tout est CoW : deux renommages de sous-volumes, aucune copie de données.
+Le montage vivant de `/` reste valable (un montage suit le sous-volume,
+pas son nom). Redémarrez ensuite pour booter sur la version restaurée.
 
 ## Utilitaire pour les scripts
 
