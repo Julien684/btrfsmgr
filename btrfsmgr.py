@@ -53,11 +53,149 @@ SNAPSHOTS_DIR = "/var/lib/btrfsmgr"
 SNAPSHOTS_STATE = "/var/lib/btrfsmgr/snapshots.state"
 GRUB_SNAPDIR_FILE = "/etc/grub.d/40_btrfsmgr_snapshots"
 BOOTXMD_SNAPDIR = "/boot/loader/entries/btrfsmgr-snapshots.conf"
+SNAP_SCRIPT = "/usr/local/bin/btrfsmgr-snap.sh"
 
 APP = "btrfsmgr"
 
 # Dossier des snapshots, créé au même niveau que @ et @home
 DEFAULT_SNAPDIR = "snapshots"
+
+# Script shell auto-suffisant (pas de dépendance python) exécuté par
+# l'unité systemd pour créer + pruner les snapshots.
+_SNAP_SCRIPT_BODY = r"""#!/usr/bin/env bash
+# btrfsmgr-snap.sh — créer un snapshot BTRFS + prune (conserver les N derniers).
+# Usage: btrfsmgr-snap.sh <root> <snapdir> <name> <keep>
+set -euo pipefail
+
+ROOT="${1:-}"
+SNAPDIR="${2:-snapshots}"
+NAME="${3:-}"
+KEEP="${4:-7}"
+
+if [[ -z "$ROOT" || -z "$NAME" ]]; then
+    echo "Usage: $0 <root> <snapdir> <name> <keep>" >&2
+    exit 1
+fi
+
+dev_of() {
+    findmnt -n -o SOURCE "$1" 2>/dev/null | head -1 | cut -d'[' -f1
+}
+is_subvolume() { btrfs subvolume show "$1" >/dev/null 2>&1; }
+is_ro()        { btrfs property get "$1" ro 2>/dev/null | grep -q 'ro=true'; }
+
+subvol_id() {
+    local base="$1" sname="$2" line
+    line="$(btrfs subvolume list "$base" 2>/dev/null \
+        | awk -v s="$sname" '{p=$0; sub(/^.* path /,"",p); if (p==s) {print $0; exit}}')"
+    [[ -n "$line" ]] && echo "$line" | awk '{print $2}'
+}
+
+ensure_snapdir() {
+    local root="$1" snapdir="$2"
+    local vis="$root/$snapdir"
+    local dev
+    dev="$(dev_of "$root")"
+    [[ -z "$dev" ]] && { echo "ERREUR: device BTRFS introuvable" >&2; exit 1; }
+
+    if [[ -n "$(findmnt -n "$vis" 2>/dev/null)" ]]; then
+        local cur
+        cur="$(findmnt -n -o SOURCE "$vis" | head -1)"
+        [[ "$cur" == *"/$snapdir]"* || "$cur" == *"/$snapdir" ]] && return 0
+        umount "$vis" 2>/dev/null || true
+    fi
+
+    local M
+    M="$(mktemp -d /tmp/btrfsmgr-snap.XXXXXX)"
+    mount -o "subvol=/,rw" "$dev" "$M"
+    local p="$M/$snapdir" entry
+
+    for entry in "$M/.btrfsmgr-mig."*; do
+        [[ -e "$entry" ]] && btrfs subvolume delete "$entry" 2>/dev/null || true
+    done
+
+    if is_subvolume "$p"; then
+        if is_ro "$p"; then
+            local tmp="$M/.btrfsmgr-mig.$$"
+            btrfs subvolume create "$tmp"
+            local rel
+            while IFS= read -r rel; do
+                [[ -z "$rel" ]] && continue
+                is_ro "$p/$rel" && btrfs property set "$p/$rel" ro false
+                mv "$p/$rel" "$tmp/$rel" 2>/dev/null || true
+            done < <(btrfs subvolume list "$p" 2>/dev/null \
+                     | awk '{x=$0; sub(/^.* path /,"",x); print x}' \
+                     | grep -v "^$snapdir$")
+            btrfs subvolume delete "$p"
+            btrfs subvolume create "$p"
+            local child
+            for child in "$tmp"/*; do
+                [[ -e "$child" ]] && mv "$child" "$p/" 2>/dev/null || true
+            done
+            btrfs subvolume delete "$tmp" 2>/dev/null || true
+        fi
+    else
+        rm -rf "$p" 2>/dev/null || true
+        btrfs subvolume create "$p"
+    fi
+
+    umount "$M"
+    rmdir "$M"
+
+    if [[ -z "$(findmnt -n "$vis" 2>/dev/null)" ]]; then
+        mkdir -p "$vis"
+        local f
+        for f in "$vis"/* "$vis"/.*; do
+            [[ -e "$f" && "$f" != "$vis/." && "$f" != "$vis/.." ]] \
+                && rm -rf "$f" 2>/dev/null || true
+        done
+        mount -o "subvol=/$snapdir,rw,noatime" "$dev" "$vis"
+    fi
+}
+
+prune_snapshots() {
+    local root="$1" snapdir="$2" keep="$3"
+    local vis="$root/$snapdir"
+    [[ "$keep" -le 0 ]] && return 0
+    local snapdir_id
+    snapdir_id="$(subvol_id "$root" "$snapdir")"
+    [[ -z "$snapdir_id" ]] && return 0
+
+    local lines
+    lines="$(btrfs subvolume list "$root" 2>/dev/null \
+        | awk -v id="$snapdir_id" '
+            {
+              gen=""; top=""; path=""
+              for (i=1; i<=NF; i++) {
+                if ($i == "gen")   gen  = $(i+1)
+                if ($i == "level" && $(i-1)=="top") top = $(i+1)
+                if ($i == "path")  path = $(i+1)
+              }
+              if (top == id && path != "") print gen, path
+            }')"
+    local total
+    total="$(echo "$lines" | grep -c . || true)"
+    [[ "$total" -le "$keep" ]] && return 0
+    local to_delete=$(( total - keep ))
+    echo "$lines" | sort -n | head -n "$to_delete" | while read -r gen pth; do
+        [[ -z "$pth" ]] && continue
+        echo "  Suppression: $root/$pth (gen $gen)"
+        btrfs subvolume delete "$root/$pth" 2>/dev/null \
+            || echo "  ! échec: $root/$pth"
+    done
+}
+
+ensure_snapdir "$ROOT" "$SNAPDIR"
+vis="$ROOT/$SNAPDIR"
+target="$vis/$NAME"
+if [[ -e "$target" ]]; then
+    echo "ERREUR: $target existe déjà" >&2
+    exit 1
+fi
+echo "[btrfsmgr-snap] créant: $ROOT → $target"
+btrfs subvolume snapshot "$ROOT" "$target"
+echo "[btrfsmgr-snap] OK: $target"
+prune_snapshots "$ROOT" "$SNAPDIR" "$KEEP"
+"""
 
 
 # ---------------------------------------------------------------------------
@@ -816,6 +954,17 @@ def _snap_unit_name(root: str, snapdir: str, tag: str) -> str:
     return f"{APP}-snap-{safe(root) or 'root'}-{safe(snapdir) or 'snap'}-{safe(tag)}"
 
 
+def install_snap_script() -> str:
+    """Écrire le script shell auto-suffisant SNAP_SCRIPT (chmod +x) et
+    renvoyer son chemin.  Le service systemd l'invoque directement, sans
+    dépendre du binaire python btrfsmgr."""
+    os.makedirs(os.path.dirname(SNAP_SCRIPT), exist_ok=True)
+    with open(SNAP_SCRIPT, "w") as f:
+        f.write(_SNAP_SCRIPT_BODY)
+    os.chmod(SNAP_SCRIPT, 0o755)
+    return SNAP_SCRIPT
+
+
 def write_timer_files(root: str, snapdir: str, tag: str, schedule: str,
                       keep: int, oneshot: bool = True) -> str:
     """Create service + timer units for automatic snapshots with retention.
@@ -828,16 +977,16 @@ def write_timer_files(root: str, snapdir: str, tag: str, schedule: str,
     tmr = f"{unit_name}.timer"
     os.makedirs(SYSTEMD_SNAPDIR, exist_ok=True)
 
-    # Service: creates the snapshot, then prunes.
+    # Script shell (pas de dépendance python) exécuté par l'unité systemd.
     # `%Y%m%d-%H%M%S` est remplacé par systemd avec le timestamp (OnCalendar).
-    binpath = shutil.which(APP) or "/bin/btrfsmgr"
+    script_path = install_snap_script()
     svc_content = f"""[Unit]
 Description={APP} — snapshot btrfs de {root} ({tag})
 DefaultDependencies=no
 
 [Service]
 Type=oneshot
-ExecStart={binpath} auto {root} --snapdir {snapdir} --name {tag}-%Y%m%d-%H%M%S --keep {keep}
+ExecStart={script_path} {root} {snapdir} {tag}-%Y%m%d-%H%M%S {keep}
 RemainAfterExit=no
 User=root
 """
@@ -900,17 +1049,16 @@ def list_timers() -> list[dict]:
 
 
 def auto_snapshot(root: str, snapdir: str, name: str | None, keep: int) -> int:
-    """Called by the systemd service: create + prune."""
+    """Créer + pruner via le script shell auto-suffisant (même code que
+    l'unité systemd).  `name` vide → timestamp de la seconde."""
     name = name or now_stamp()
-    ensure_snapdir(root, snapdir)
-    target = os.path.join(root, snapdir, name)
-    print(f"[{APP}] auto snapshot: {root} → {target}")
-    rc, out = make_snapshot(root, target)
+    script = install_snap_script()
+    print(f"[{APP}] auto snapshot: {root} → {os.path.join(root, snapdir, name)}")
+    rc, out = run([script, root, snapdir, name, str(keep)])
     if rc != 0:
         print(out.strip())
         return rc
-    print(f"[{APP}] création OK: {target}")
-    prune_snapshots(root, snapdir, keep)
+    print(f"[{APP}] création OK: {os.path.join(root, snapdir, name)}")
     return 0
 
 
@@ -1819,7 +1967,7 @@ def cli_uninstall(args) -> int:
                 f.writelines(kept)
             print(f"  - fstab: ligne {snapdir_full} retirée")
 
-    for path in ("/bin/btrfsmgr", "/usr/local/bin/btrfsmgr"):
+    for path in ("/bin/btrfsmgr", "/usr/local/bin/btrfsmgr", SNAP_SCRIPT):
         if os.path.lexists(path):
             os.remove(path)
             print(f"  - binaire retiré: {path}")
