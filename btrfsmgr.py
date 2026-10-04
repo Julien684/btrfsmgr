@@ -598,10 +598,17 @@ def ensure_snapdir(root: str, snapdir: str) -> str:
         montage temporaire de la racine du FS (fs_root_mount), car quand
         / est monté sur @, `btrfs subvolume create /snapshots` créerait
         le dossier DEDANS @.
-      * il est ensuite **monté** sur <root>/<snapdir> (entrée fstab).
-        Quand le système est monté sur @, le sous-volume racine-niveau
-        n'est pas visible sinon: c'est ce montage qui le rend accessible
-        au quotidien (créer/supprimer/lister les snapshots).
+      * il est ensuite **monté** sur <root>/<snapdir> (montage à la
+        volée, jamais au boot).  Quand le système est monté sur @, le
+        sous-volume racine-niveau n'est pas visible sinon: c'est ce
+        montage qui le rend accessible au quotidien (créer/supprimer/
+        lister les snapshots).
+      * quand / est monté sur un SNAPSHOT (booté dessus via
+        systemd-boot), <root>/<snapdir> n'existe même pas comme dossier
+        (un snapshot = sous-volume plat, impossible d'y créer un
+        sous-dossier): l'ancien code faisait `os.makedirs` + mount →
+        échec + sys.exit(1).  Le montage se fait alors via un montage
+        temporaire de la racine du FS (voir le point 3 ci-dessous).
 
     Migrations gérées automatiquement (toutes dans le temp-mount racine,
     où l'ancien sous-volume in-@ et le nouveau sont visibles ensemble):
@@ -1708,9 +1715,16 @@ class TUI:
         if not 0 <= idx < len(snaps_r):
             print("Choix invalide"); self.pause(); return
         snap = snaps_r[idx]
-        at = _subvol_of_mount(self.root, self.root) \
-             or (default_subvol(self.root).get("path") or "").strip("/") \
-             or "(racine du FS)"
+        # MÊME ancre que restore_snapshot: subvolume PAR DÉFAUT du FS
+        # (typ. @), pas le sous-volume monté sur / (qui peut être un
+        # snapshot quand on a booté dessus via systemd-boot).
+        dv = default_subvol(self.root)
+        at = (dv.get("path") or "").strip("/")
+        if not at:
+            _mnt = _subvol_of_mount(self.root, self.root)
+            # uniquement un nom simple au top level (pas "snapshots/…")
+            at = _mnt.split("/")[-1] if _mnt and "/" not in _mnt else ""
+        at = at or "(racine du FS)"
         self.confirm(
             f"Restaurer {snap['path']} en premier plan par deux mv (CoW) ?\n\n"
             f"  1. mv  {at} → {self.snapdir}/{at}_old-<date-heure>  (conserve l'actuel)\n"
