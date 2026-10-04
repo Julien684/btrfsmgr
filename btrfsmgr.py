@@ -537,6 +537,64 @@ def default_subvol(root: str) -> dict:
     return {"gen": 0, "path": "", "full": root}
 
 
+def boot_subvol(root: str) -> str | None:
+    """Nom du sous-volume PRINCIPAL de boot (celui qu'on remplace en
+    restaurant un snapshot).  C'est l'ancrage de la restauration.
+
+    Trois sources, par fiabilité décroissante — la restauration doit
+    produire un volume de boot nommé (ex. @) quel que soit le boot actuel :
+
+      1. Le sous-volume MONTÉ SUR /, s'il est top-level (sans slash).
+         Cas « booté normalement » : / est sur @ → renvoie @.
+      2. Le sous-volume de l'entrée de boot STANDARD du chargeur
+         (ex. `rootflags=subvol=@` dans l'entrée Solus) — la source
+         d'autorité sur le volume de boot.  Indépendant des permissions
+         de `btrfs subvolume get-default` (qui échoue en non-root) et du
+         sous-volume courant monté sur / (qui peut être un snapshot
+         imbriqué `snapshots/…` quand on a booté dessus via systemd-boot).
+      3. Le default subvolume du FS (last resort).
+
+    None si aucun sous-volume nommé n'est identifiable (impossible de
+    restaurer par mv sans un volume de boot nommé).
+    """
+    mnt = _subvol_of_mount(root, root)
+    if mnt and "/" not in mnt:
+        return mnt.rstrip("/")
+    std = _standard_entry_subvol()
+    if std and "/" not in std:
+        return std.rstrip("/")
+    dv = default_subvol(root)
+    p = (dv.get("path") or "").strip("/")
+    if p:
+        return p
+    return None
+
+
+def _standard_entry_subvol() -> str:
+    """Sous-volume d'entrée de boot STANDARD (celle de la distribution).
+
+    Parcourt le dossier des entrées du chargeur (systemd-boot ou BLS) et
+    renvoie le `subvol=` de la première entrée QUI N'EST PAS gérée par
+    btrfsmgr (préfixe `btrfsmgr-`) — c'est l'entrée standard de la distro
+    (ex. Solus → `rootflags=subvol=@`).  Source d'autorité sur le volume
+    de boot principal, indépendante des permissions btrfs.  "" si rien.
+    """
+    dirs = []
+    for d in ("/boot/loader/entries", "/efi/loader/entries", "/boot/efi/loader/entries"):
+        if os.path.isdir(d) and d not in dirs:
+            dirs.append(d)
+    for d in dirs:
+        for fname in sorted(os.listdir(d)):
+            if not fname.endswith((".conf", ".cfg")):
+                continue
+            if fname.startswith(("btrfsmgr-", "00-")):
+                continue  # entrées btrfsmgr / fallbacks
+            sv = _entry_subvol(os.path.join(d, fname))
+            if sv:
+                return sv
+    return ""
+
+
 def make_snapshot(source: str, target: str) -> tuple[int, str]:
     """Créer un snapshot **read-write** de `source` vers `target`.
 
@@ -1107,27 +1165,21 @@ def restore_snapshot(root: str, snapdir: str, snap_name: str) -> int:
     @ (le sous-volume restauré, rw) — donc les boots par subvol=@ *et*
     subvolid=<N> atterrissent bien sur la version restaurée.
     """
-    # Le sous-volume à échanger est le VOLUME DE BOOT PRINCIPAL (typ. @),
-    # c'est-à-dire le sous-volume PAR DÉFAUT du FS — celui sur lequel
-    # pointe l'entrée de boot standard.  Ce n'est PAS (nécessairement) le
-    # sous-volume monté sur / : si on a booté sur un instantané via
-    # systemd-boot, / est sur snapshots/<snap>, pas sur @.  C'est bien @
-    # qu'on veut remplacer par le snapshot restauré, dans les deux cas.
-    dv = default_subvol(root)
-    at_name = (dv.get("path") or "").strip("/")
-    if not at_name:
-        # Default nommeable (FS_TREE, id 5): retomber sur le sous-volume
-        # monté sur /, S'il est un nom simple au top level (@, etc.).
-        # On n'utilise JAMAIS une forme snapshots/… (on ne remplace pas
-        # un snapshot imbriqué par son propre parent).
-        mnt = _subvol_of_mount(root, root)
-        if mnt and "/" not in mnt:
-            at_name = mnt
+    # L'ancrage de restauration est le SOUS-VOLUME DE BOOT PRINCIPAL
+    # (typ. @) — celui que la restauration remplace par le snapshot.
+    # Ce n'est PAS (nécessairement) le sous-volume monté sur / : si on a
+    # booté sur un instantané via systemd-boot, / est sur snapshots/<snap>,
+    # pas sur @.  C'est bien @ qu'on veut remplacer, dans les deux cas.
+    # `boot_subvol` résout le volume de boot principal via trois sources :
+    #   1. sous-volume monté sur / (si top-level)
+    #   2. entrée de boot standard du chargeur (rootflags=subvol=@)
+    #   3. default subvolume du FS (last resort)
+    at_name = boot_subvol(root)
     if not at_name:
         print("ERREUR: aucun sous-volume principal nommé (le default "
-              "subvolume est la racine du FS, sans nom, et / n'est pas "
-              "sur un sous-volume nommé).  La restauration par mv "
-              "nécessite un volume de boot nommé (ex. @, @rootfs).")
+              "subvolume et l'entrée de boot standard sont sans nom, et "
+              "/ n'est pas sur un sous-volume nommé).  La restauration "
+              "par mv nécessite un volume de boot nommé (ex. @, @rootfs).")
         return 1
 
     at_name = at_name.rstrip("/")
@@ -1715,20 +1767,14 @@ class TUI:
         if not 0 <= idx < len(snaps_r):
             print("Choix invalide"); self.pause(); return
         snap = snaps_r[idx]
-        # MÊME ancre que restore_snapshot: subvolume PAR DÉFAUT du FS
-        # (typ. @), pas le sous-volume monté sur / (qui peut être un
-        # snapshot quand on a booté dessus via systemd-boot).
-        dv = default_subvol(self.root)
-        at = (dv.get("path") or "").strip("/")
-        if not at:
-            _mnt = _subvol_of_mount(self.root, self.root)
-            # uniquement un nom simple au top level (pas "snapshots/…")
-            at = _mnt.split("/")[-1] if _mnt and "/" not in _mnt else ""
-        at = at or "(racine du FS)"
+        # MÊME ancre que restore_snapshot: le SOUS-VOLUME DE BOOT
+        # PRINCIPAL (typ. @), pas le sous-volume monté sur / (qui peut
+        # être un snapshot quand on a booté dessus via systemd-boot).
+        at = boot_subvol(self.root) or "(racine du FS)"
         self.confirm(
             f"Restaurer {snap['path']} en premier plan par deux mv (CoW) ?\n\n"
             f"  1. mv  {at} → {self.snapdir}/{at}_old-<date-heure>  (conserve l'actuel)\n"
-            f"  2. mv  {self.snapdir}/{snap['path']} → {at}  (le snapshot devient @)\n\n"
+            f"  2. mv  {self.snapdir}/{snap['path']} → {at}  (le snapshot devient le volume de boot)\n\n"
             f"Le sous-volume courant n'est pas perdu: il reste dans "
             f"{self.snapdir}/.\n"
             f"Redémarrez ensuite pour booter sur la version restaurée.")
