@@ -43,6 +43,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -831,13 +832,13 @@ def list_snapshots(root: str, snapdir: str = DEFAULT_SNAPDIR) -> list[dict]:
     snap_prefix = snap + "/"
     if os.path.isdir(os.path.join(root, snapdir)):
         base = root
-        rc, out = run(["btrfs", "subvolume", "list", "-s", base],
+        rc, out = run(["btrfs", "subvolume", "list", base],
                       check=False)
     else:
         with fs_root_mount(root) as r:
             if not os.path.isdir(os.path.join(r, snapdir)):
                 return []
-            rc, out = run(["btrfs", "subvolume", "list", "-s", r],
+            rc, out = run(["btrfs", "subvolume", "list", r],
                           check=False)
     subs = []
     if rc == 0:
@@ -871,6 +872,8 @@ def list_snapshots(root: str, snapdir: str = DEFAULT_SNAPDIR) -> list[dict]:
 def create_snapshot(root: str, snapdir: str = DEFAULT_SNAPDIR,
                      name: str | None = None) -> str:
     name = name or now_stamp()
+    # Normaliser les espaces en underscores (noms de sous-volumes robustes)
+    name = name.replace(" ", "_")
     ensure_snapdir(root, snapdir)
     target = os.path.join(root, snapdir, name)
     rc, out = make_snapshot(root, target)
@@ -1634,6 +1637,16 @@ class TUI:
             f"{self.snapdir}/.\n"
             f"Redémarrez ensuite pour booter sur la version restaurée.")
         restore_snapshot(self.root, self.snapdir, snap["path"])
+        self.sync_boot()
+        # Option de redémarrage immédiate pour booter sur la version restaurée
+        if self.ask_yn("\nRedémarrer maintenant pour booter sur la version "
+                       "restaurée ?"):
+            run(["systemctl", "reboot"], check=False)
+            # systemctl reboot prend le relais ; on termine proprement
+            try:
+                time.sleep(2)
+            except Exception:
+                pass
         self.pause()
 
     def do_delete(self):
