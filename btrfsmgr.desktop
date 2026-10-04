@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=BTRFS Manager
+Comment=Gérer les sous-volumes BTRFS — snapshots, restauration, automation
+Exec=/usr/local/bin/btrfsmgr
+Icon=system-software-update
+Terminal=true
+Categories=System;Filesystem;
+Keywords=btrfs;snapshot;submenu;restore;

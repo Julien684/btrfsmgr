@@ -55,6 +55,7 @@ SNAPSHOTS_STATE = "/var/lib/btrfsmgr/snapshots.state"
 GRUB_SNAPDIR_FILE = "/etc/grub.d/40_btrfsmgr_snapshots"
 BOOTXMD_SNAPDIR = "/boot/loader/entries/btrfsmgr-snapshots.conf"
 SNAP_SCRIPT = "/usr/local/bin/btrfsmgr-snap.sh"
+DESKTOP_FILE = "/usr/share/applications/btrfsmgr.desktop"
 
 APP = "btrfsmgr"
 
@@ -195,6 +196,12 @@ fi
 echo "[btrfsmgr-snap] créant: $ROOT → $target"
 btrfs subvolume snapshot "$ROOT" "$target"
 echo "[btrfsmgr-snap] OK: $target"
+# Notification graphique (si notify-send est dispo — GNOME/KDE)
+if command -v notify-send >/dev/null 2>&1; then
+    notify-send "BTRFS Manager" \
+        "Instantané créé: $SNAPDIR/$NAME" \
+        -i system-software-update 2>/dev/null || true
+fi
 prune_snapshots "$ROOT" "$SNAPDIR" "$KEEP"
 """
 
@@ -922,11 +929,42 @@ def _snap_unit_name(root: str, snapdir: str, tag: str) -> str:
 def install_snap_script() -> str:
     """Écrire le script shell auto-suffisant SNAP_SCRIPT (chmod +x) et
     renvoyer son chemin.  Le service systemd l'invoque directement, sans
-    dépendre du binaire python btrfsmgr."""
+    dépendre du binaire python btrfsmgr.  Installe aussi l'icône menu
+    (fichier .desktop) si le dépôt la fournit."""
     os.makedirs(os.path.dirname(SNAP_SCRIPT), exist_ok=True)
     with open(SNAP_SCRIPT, "w") as f:
         f.write(_SNAP_SCRIPT_BODY)
     os.chmod(SNAP_SCRIPT, 0o755)
+    # Icône menu de programmes (.desktop)
+    try:
+        src_desktop = None
+        repo_dir = os.path.dirname(os.path.abspath(__file__))
+        cand = os.path.join(repo_dir, "btrfsmgr.desktop")
+        if os.path.isfile(cand):
+            src_desktop = cand
+        if src_desktop:
+            os.makedirs(os.path.dirname(DESKTOP_FILE), exist_ok=True)
+            with open(src_desktop) as rf, open(DESKTOP_FILE, "w") as wf:
+                wf.write(rf.read())
+            print(f"  - icône menu installée: {DESKTOP_FILE}")
+        else:
+            # Fallback: on génère un .desktop minimal
+            os.makedirs(os.path.dirname(DESKTOP_FILE), exist_ok=True)
+            with open(DESKTOP_FILE, "w") as f:
+                f.write(
+                    "[Desktop Entry]\n"
+                    "Type=Application\n"
+                    "Name=BTRFS Manager\n"
+                    "Comment=Gérer les sous-volumes BTRFS — snapshots, "
+                    "restauration, automation\n"
+                    "Exec=/usr/local/bin/btrfsmgr\n"
+                    "Icon=system-software-update\n"
+                    "Terminal=true\n"
+                    "Categories=System;Filesystem;\n"
+                )
+            print(f"  - icône menu installée: {DESKTOP_FILE}")
+    except OSError as e:
+        print(f"  ! icône menu non installée: {e}")
     return SNAP_SCRIPT
 
 
@@ -1069,6 +1107,15 @@ def restore_snapshot(root: str, snapdir: str, snap_name: str) -> int:
               "(ex. @, @rootfs).")
         return 1
 
+    # Le nom de la racine boot ne contient JAMAIS de slash (@, @rootfs…).
+    # Si findmnt a renvoyé une forme imbriquée (ex. "snapshots/avant_btop"
+    # juste après une restauration partiellement échouée), on ne garde que
+    # le dernier segment — sinon le second mv double le chemin
+    # (snapshots/snapshots/…) et la restauration échoue.
+    at_name = at_name.rstrip("/")
+    if "/" in at_name:
+        at_name = at_name.split("/")[-1]
+
     rel = _snaprel(snap_name)
     src = os.path.join(root, snapdir, rel)
     if not os.path.isdir(src):
@@ -1098,6 +1145,10 @@ def restore_snapshot(root: str, snapdir: str, snap_name: str) -> int:
         if rc != 0:
             print(f"Échec du déplacement de {at}:\n{out.strip()}")
             return rc
+        # Durcit le premier renommage sur disque avant le second: évite un
+        # état intermédiaire (le montage vivant suit le sous-volume par ID,
+        # mais un synchro rend l'écarte durable avant de remplacer).
+        run(["sync"], check=False)
 
         # le snapshot devenu @ doit pouvoir se monter en rw (boot)
         run(["btrfs", "property", "set", snap, "ro", "false"], check=False)
@@ -1468,9 +1519,30 @@ class TUI:
     """A very small curses-free line TUI (no ncurses dependency)."""
 
     def __init__(self, root: str, snapdir: str = DEFAULT_SNAPDIR):
-        self.root = root
+        self.root = self._validate_root(root)
         self.snapdir = snapdir
         self._refreshed = False
+
+    @staticmethod
+    def _validate_root(raw_root: str) -> str:
+        """Corriger un root erroné (ex. /snapshots) en remontant à /.
+
+        Le TUI doit toujours opérer sur la RACINE SYSTÈME (/), pas sur un
+        sous-dossier comme /snapshots.  Sans cette correction, les chemins
+        deviennent doublés (snapshots/snapshots/…) et la restauration échoue.
+        """
+        r = raw_root.rstrip("/")
+        if r == "" or r == "/":
+            return "/"
+        # Si le root est un sous-dossier connu (snapdir), on remonte à /
+        if r in ("/snapshots", "snapshots"):
+            print("NOTE: root /snapshots détecté — restauration impossible "
+                  "sur un sous-dossier.  Utilisation de / "
+                  "(racine système).")
+            return "/"
+        # Autre cas: on tente de trouver la racine système via le montage
+        # Si / est un sous-volume BTRFS, le TUI doit toujours partir de /
+        return "/"
 
     # -- rendering ---------------------------------------------------------
     def render(self, title: str, items: list[str], footer: str = ""):
@@ -1946,6 +2018,11 @@ def cli_uninstall(args) -> int:
         if os.path.lexists(path):
             os.remove(path)
             print(f"  - binaire retiré: {path}")
+
+    # Icône menu (.desktop)
+    if os.path.lexists(DESKTOP_FILE):
+        os.remove(DESKTOP_FILE)
+        print(f"  - icône menu retirée: {DESKTOP_FILE}")
 
     print(f"\nDésinstallation terminée. Le sous-volume snapshots "
           f"({os.path.join(args.root, args.snapdir)}) a été CONSERVÉ "

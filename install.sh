@@ -26,6 +26,26 @@ command -v python3 >/dev/null || {
 install -m 0755 "$SRC_DIR/btrfsmgr.py" "$DEST"
 echo "✓ btrfsmgr installé dans $DEST"
 
+# --- Icône menu de programmes (.desktop) ------------------------------------
+DEST_DESKTOP=/usr/share/applications/btrfsmgr.desktop
+if [[ -f "$SRC_DIR/btrfsmgr.desktop" ]]; then
+    install -m 0644 "$SRC_DIR/btrfsmgr.desktop" "$DEST_DESKTOP"
+    echo "✓ icône menu installée dans $DEST_DESKTOP"
+else
+    # Fallback: générer un .desktop minimal
+    cat > "$DEST_DESKTOP" <<'DESKTOP'
+[Desktop Entry]
+Type=Application
+Name=BTRFS Manager
+Comment=Gérer les sous-volumes BTRFS — snapshots, restauration, automation
+Exec=/bin/btrfsmgr
+Icon=system-software-update
+Terminal=true
+Categories=System;Filesystem;
+DESKTOP
+    echo "✓ icône menu installée (générée) dans $DEST_DESKTOP"
+fi
+
 # --- Dossiers des snapshots ------------------------------------------------
 # Les snapshots vivent dans un sous-volume `snapshots` au NIVEAU RACINE du
 # FS BTRFS (même niveau que @ et @home), monté sur /snapshots.
@@ -39,13 +59,6 @@ echo "✓ btrfsmgr installé dans $DEST"
 echo
 echo "Vérification du dossier des snapshots (snapshots au niveau racine)…"
 "$DEST" ensure / --snapdir snapshots
-
-# rsync est utilisé par la restauration (mode 1)
-if ! command -v rsync >/dev/null; then
-    echo
-    echo "⚠ rsync introuvable — la restauration en sera limitée."
-    echo "  Solus:  eopkg install rsync"
-fi
 
 # clr-boot-manager est utilisé pour monter /boot (Solus, partition EFI)
 if ! command -v clr-boot-manager >/dev/null; then
