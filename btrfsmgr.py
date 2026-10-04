@@ -514,18 +514,26 @@ def fs_root_mount(root: str):
 
 
 def default_subvol(root: str) -> dict:
-    """Return the *default* subvolume of the filesystem at root."""
+    """Return the *default* subvolume of the filesystem at root.
+
+    Gère les deux formats de sortie de btrfs-progs:
+      v6.x:  "ID 259 (path @) gen 150"
+      v7.x:  "ID 259 gen 150 top level 5 path @"
+    """
     rc, out = run(["btrfs", "subvolume", "get-default", root], check=False)
     if rc != 0:
         return {"gen": 0, "path": "", "full": root}
-    # "ID 5 (path @) gen 12348 top level 5"  |  "ID 256 (path @)"  |
-    # "ID 5 (FS_TREE)" (pas de subvolume par défaut explicite)
-    m = re.search(r"ID\s+(\d+)\s*(?:\((path\s+([^\s)]+)|FS_TREE)\))?\s*"
-                  r"(?:gen\s+(\d+))?", out)
-    if m:
-        svol = (m.group(3) or "").strip()
-        return {"gen": int(m.group(4) or 0), "path": svol,
-                "full": os.path.join(root, svol) if svol else root}
+    m_id  = re.search(r"ID\s+(\d+)", out)
+    m_path = re.search(r"path\s+(\S+)", out)
+    m_gen  = re.search(r"gen\s+(\d+)", out)
+    if m_id and m_path:
+        svol = m_path.group(1).strip()
+        gen  = int(m_gen.group(1)) if m_gen else 0
+        return {"gen": gen, "path": svol,
+                "full": os.path.join(root, svol)}
+    if m_id:
+        gen  = int(m_gen.group(1)) if m_gen else 0
+        return {"gen": gen, "path": "", "full": root}
     return {"gen": 0, "path": "", "full": root}
 
 
@@ -1092,43 +1100,37 @@ def restore_snapshot(root: str, snapdir: str, snap_name: str) -> int:
     @ (le sous-volume restauré, rw) — donc les boots par subvol=@ *et*
     subvolid=<N> atterrissent bien sur la version restaurée.
     """
-    # Le sous-volume à échanger est celui MONTÉ SUR LA RACINE SYSTÈME (le
-    # root de boot: @, @rootfs, @home, …), pas le « default subvolume » qui
-    # peut être la racine du FS (subvolid 5, sans nom → pas renommable).
-    at_name = _subvol_of_mount(root, root)
+    # Le sous-volume à échanger est le VOLUME DE BOOT PRINCIPAL (typ. @),
+    # c'est-à-dire le sous-volume PAR DÉFAUT du FS — celui sur lequel
+    # pointe l'entrée de boot standard.  Ce n'est PAS (nécessairement) le
+    # sous-volume monté sur / : si on a booté sur un instantané via
+    # systemd-boot, / est sur snapshots/<snap>, pas sur @.  C'est bien @
+    # qu'on veut remplacer par le snapshot restauré, dans les deux cas.
+    dv = default_subvol(root)
+    at_name = (dv.get("path") or "").strip("/")
     if not at_name:
-        # fallback: sous-volume par défaut s'il a un nom propre
-        dv = default_subvol(root)
-        at_name = (dv.get("path") or "").strip("/")
+        # Default nommeable (FS_TREE, id 5): retomber sur le sous-volume
+        # monté sur /, S'il est un nom simple au top level (@, etc.).
+        # On n'utilise JAMAIS une forme snapshots/… (on ne remplace pas
+        # un snapshot imbriqué par son propre parent).
+        mnt = _subvol_of_mount(root, root)
+        if mnt and "/" not in mnt:
+            at_name = mnt
     if not at_name:
-        print("ERREUR: aucun sous-volume nommé monté sur la racine "
-              "système (montage direct sur la racine du FS).  La "
-              "restauration par mv nécessite un sous-volume nommé "
-              "(ex. @, @rootfs).")
+        print("ERREUR: aucun sous-volume principal nommé (le default "
+              "subvolume est la racine du FS, sans nom, et / n'est pas "
+              "sur un sous-volume nommé).  La restauration par mv "
+              "nécessite un volume de boot nommé (ex. @, @rootfs).")
         return 1
 
-    # Le sous-volume racine peut être n'importe où dans l'arborescence:
-    # normalement au top level (@, @rootfs…), mais après une restauration
-    # partiellement échouée il peut avoir dérivé sous snapshots/ (ex.
-    # "snapshots/avant_btop").  on garde at_name COMPLET pour les chemins
-    # physiques (le second mv le renomme à `at`, donc il revient au top
-    # level), et on dérive at_leaf (basename, sans slash) pour le nom de
-    # l'archive @_old-<ts>.
-    # Normaliser at_name: le chemin physique DOIT être au top level.
-    # Si findmnt a renvoyé une forme imbriquée (ex. "snapshots/avant_btop"
-    # après une restauration partiellement échouée), on ne garde que le
-    # dernier segment — sinon le second mv double le chemin
-    # (snapshots/snapshots/…) et la restauration échoue.
     at_name = at_name.rstrip("/")
-    if "/" in at_name:
-        at_name = at_name.split("/")[-1]
     at_leaf = at_name
 
     rel = _snaprel(snap_name)
-    src = os.path.join(root, snapdir, rel)
-    if not os.path.isdir(src):
-        print(f"Snapshot introuvable: {src}")
-        return 1
+    # NOTE: pas de vérification isdir() précoce sur le chemin live
+    # (snapshots/… peut ne pas résider comme un simple dossier quand on a
+    # booté depuis le sous-volume snapshots).  La vraie vérification se
+    # fait dans fs_root_mount (montage temporaire de la racine du FS).
 
     with fs_root_mount(root) as r:
         at = os.path.join(r, at_name)
