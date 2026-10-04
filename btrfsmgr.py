@@ -1107,14 +1107,22 @@ def restore_snapshot(root: str, snapdir: str, snap_name: str) -> int:
               "(ex. @, @rootfs).")
         return 1
 
-    # Le nom de la racine boot ne contient JAMAIS de slash (@, @rootfs…).
+    # Le sous-volume racine peut être n'importe où dans l'arborescence:
+    # normalement au top level (@, @rootfs…), mais après une restauration
+    # partiellement échouée il peut avoir dérivé sous snapshots/ (ex.
+    # "snapshots/avant_btop").  on garde at_name COMPLET pour les chemins
+    # physiques (le second mv le renomme à `at`, donc il revient au top
+    # level), et on dérive at_leaf (basename, sans slash) pour le nom de
+    # l'archive @_old-<ts>.
+    # Normaliser at_name: le chemin physique DOIT être au top level.
     # Si findmnt a renvoyé une forme imbriquée (ex. "snapshots/avant_btop"
-    # juste après une restauration partiellement échouée), on ne garde que
-    # le dernier segment — sinon le second mv double le chemin
+    # après une restauration partiellement échouée), on ne garde que le
+    # dernier segment — sinon le second mv double le chemin
     # (snapshots/snapshots/…) et la restauration échoue.
     at_name = at_name.rstrip("/")
     if "/" in at_name:
         at_name = at_name.split("/")[-1]
+    at_leaf = at_name
 
     rel = _snaprel(snap_name)
     src = os.path.join(root, snapdir, rel)
@@ -1126,7 +1134,7 @@ def restore_snapshot(root: str, snapdir: str, snap_name: str) -> int:
         at = os.path.join(r, at_name)
         snap = os.path.join(r, snapdir, rel)
         stamp = now_stamp()
-        old = os.path.join(r, snapdir, f"{at_name}_old-{stamp}")
+        old = os.path.join(r, snapdir, f"{at_leaf}_old-{stamp}")
 
         if not (is_btrfs_subvolume(at) or is_ro_subvolume(at)):
             print(f"ERREUR: sous-volume par défaut introuvable: {at}")
