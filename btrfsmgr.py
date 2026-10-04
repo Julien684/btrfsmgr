@@ -371,21 +371,6 @@ def _subvols_by_id(root: str) -> dict:
     return m
 
 
-def _subvol_id(mount: str, name: str) -> int | None:
-    """ID numérique du sous-volume `name` (chemin relatif à la racine du
-    FS, sans slash initial) vu depuis `mount` (montage quelconque sur le
-    même FS).  None si introuvable."""
-    table = _subvols_by_id(mount)
-    rev = {v: k for k, v in table.items()}
-    val = rev.get(name)
-    if val is None:
-        return None
-    try:
-        return int(val)
-    except (ValueError, TypeError):
-        return None
-
-
 def _subvol_of_mount(mount: str, root: str) -> str | None:
     """Nom (sans slash) du sous-volume BTRFS monté sur `mount`.
 
@@ -826,42 +811,34 @@ def list_snapshots(root: str, snapdir: str = DEFAULT_SNAPDIR) -> list[dict]:
     """Snapshots de <root>/<snapdir> (snapdir au niveau racine du FS,
     monté sur <root>/<snapdir> par ensure_snapdir).
 
-    Note btrfs-progs ≥ 7.1 (comportement modifié): `btrfs subvolume list -s
-    <chemin>` ne liste plus seulement l'arbre de <chemin> — il renvoie
-    maintenant *tous* les sous-volumes du FS, avec `path` relatif à la
-    racine du FS (et non au chemin) et `top level` = l'ID du PARENT.  On
-    exploite donc ces deux propriétés: `path` devient "relatif au snapdir"
-    (strip du préfixe "snapdir/"), et le filtre tient sur `top level ==
-    ID du snapdir` (le seul parent valide pour un snapshot).  S'il n'est
-    pas monté (premier run), on passe par un montage temporaire de la
-    racine du FS (même parsing).
+    Robustesse btrfs-progs ≥ 7.1: `btrfs subvolume list -s <chemin>` ne
+    liste plus seulement l'arbre de <chemin> — il renvoie *tous* les
+    sous-volumes du FS, avec `path` relatif à la racine du FS.  On filtre
+    donc par CHEMIN: un snapshot est un sous-volume dont le `path` est
+    `snapdir/<nom>`.  Le chemin est la source de vérité (pas le champ
+    `top level`): celui-ci reflète le parent d'ORIGINE d'un sous-volume
+    et NE CHANGE PAS lors d'un `mv` (btrfs mv = rename, le `top level`
+    reste celui de l'ancien parent).  Conséquence: un sous-volume obtenu
+    par `mv` (ex. @ → snapshots/@_old-…) a `top level` = racine du FS,
+    pas l'ID du snapdir, et serait écarté par un filtre by-id — alors
+    qu'il EST physiquement dans le snapdir.  Le chemin, lui, reflète la
+    position physique (`snapshots/@_old-…`) → il est conservé.
+
+    S'il n'est pas monté (premier run), on passe par un montage
+    temporaire de la racine du FS (même parsing).
     """
     snap = snapdir.strip("/")
-    # On s'appuie sur le champ `top level` (ID du PARENT du sous-volume),
-    # présent dans la sortie de `btrfs subvolume list` quel que soit le
-    # btrfs-progs: un snapshot est EXACTEMENT un sous-volume dont le
-    # parent est le snapdir.  C'est le filtre fiable, car:
-    #   - btrfs ≤ 7.0: `list -s <snapdir>` ne renvoyait que l'arbre;
-    #   - btrfs ≥ 7.1: `list -s <chemin>` renvoie TOUS les sous-volumes
-    #     du FS (path relative au chemin demandé), donc `@_save` (parent
-    #     = racine) y apparaîtrait en plus du snapshots → on doit filtrer.
-    # Le snapdir doit être monté (ensure_snapdir le fait), sinon on passe
-    # par un montage temporaire de la racine du FS.  On lit l'ID du
-    # snapdir depuis la RACINE du FS (le snapdir n'est pas listé quand on
-    # part de lui-même).
+    snap_prefix = snap + "/"
     if os.path.isdir(os.path.join(root, snapdir)):
         base = root
         rc, out = run(["btrfs", "subvolume", "list", "-s", base],
                       check=False)
-        snapdir_id = _subvol_id(base, snap)
     else:
         with fs_root_mount(root) as r:
-            p = os.path.join(r, snapdir)
-            if not os.path.isdir(p):
+            if not os.path.isdir(os.path.join(r, snapdir)):
                 return []
             rc, out = run(["btrfs", "subvolume", "list", "-s", r],
                           check=False)
-            snapdir_id = _subvol_id(r, snap)
     subs = []
     if rc == 0:
         for line in out.splitlines():
@@ -872,31 +849,16 @@ def list_snapshots(root: str, snapdir: str = DEFAULT_SNAPDIR) -> list[dict]:
                 gen = int(parts[1])
             except (IndexError, ValueError):
                 continue
-            # parent = champ `top level N` (unique sur btrfs ≥ 7.1; sur
-            # d'anciennes versions `list -s <snapdir>` n'incluait que
-            # l'arbre, donc le filtre by-id est un no-op utile).
-            top = None
-            if "top" in parts:
-                ti = parts.index("top")
-                if ti + 2 < len(parts) and parts[ti + 1] == "level":
-                    try:
-                        top = int(parts[ti + 2])
-                    except ValueError:
-                        top = None
             p = line.split(" path ", 1)[1].strip().lstrip("/")
-            # `path` est relative au snapdir sur les deux familles de
-            # versions, mais strip défensif du préfixe "snapdir/" au cas
-            # où une version la remonterait.
-            if p.startswith(snap + "/"):
-                rel = p[len(snap) + 1:]
-            else:
-                rel = p
-            if rel == "" or rel == snap:
+            # Conserver UNIQUEMENT les sous-volumes physiquement dans le
+            # snapdir (path = "snapdir/<nom>").  `@_save`, `@home`, `@`
+            # ont un path sans préfixe → écartés.  `@_old-…` (après mv)
+            # a path `snapshots/@_old-…` → conservé.
+            if not p.startswith(snap_prefix):
+                continue
+            rel = p[len(snap_prefix):]
+            if rel == "":
                 continue  # le snapdir lui-même
-            # filtre fiable: le parent DOIT être le snapdir
-            if snapdir_id is not None:
-                if top is not None and top != snapdir_id:
-                    continue
             subs.append({
                 "gen": gen,
                 "path": rel,
