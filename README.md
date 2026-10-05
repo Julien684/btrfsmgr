@@ -42,6 +42,30 @@ Dépendances : `btrfs-progs`, `python3 ≥ 3.8`, `systemd` (timers).
 La restauration ne nécessite **ni rsync ni copie** : c'est un swap CoW
 de sous-volumes (deux `mv`).
 
+## Version et mise à jour
+
+`btrfsmgr --version` (ou `-V`) affiche la version installée.
+
+Le projet est versionné par *tags git* (`v1.0.0`, `v1.1.0`, …) sur GitHub, et
+la version locale est constante `VERSION` dans `btrfsmgr.py`.
+
+`btrfsmgr update` (menu/CLI, sans argument) vérifie automatiquement la
+dernière version sur GitHub :
+
+```sh
+btrfsmgr update
+```
+
+* interroge les tags du dépôt GitHub (API GitHub, sinon `git ls-remote`) ;
+* compare la version distante à la version locale ;
+* si une version **supérieure** est disponible, il la propose et, sur
+  confirmation, clône cette version (clone temporaire) puis relance
+  `install.sh` — le dépôt de travail local n'est pas modifié ;
+* sinon il affiche « Vous êtes déjà à jour » (réinstallation locale
+  possible) ;
+* hors ligne ou dépôt sans tag, il relance l'`install.sh` local
+  (comportement historique) : `btrfsmgr update /chemin/vers/le/depot`.
+
 ## Fonctionnalités
 
 | Menu | Action |

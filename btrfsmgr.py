@@ -2178,9 +2178,11 @@ def _latest_remote_version(repo_url: str) -> str | None:
     """Dernière version (tag) disponible sur GitHub, None si aucune/indisponible."""
     best = None
     for t in _github_tags(repo_url):
-        if not t or not str(t)[0:1].isdigit():
+        if not t:
             continue
-        v = str(t).lstrip("vV")
+        v = str(t).strip().lstrip("vV")
+        if not v or not v[0].isdigit():
+            continue
         if best is None or _version_key(v) > _version_key(best):
             best = v
     return best
