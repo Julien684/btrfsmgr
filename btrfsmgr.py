@@ -62,7 +62,7 @@ APP = "btrfsmgr"
 # ---------------------------------------------------------------------------
 # Version / mise à jour
 # ---------------------------------------------------------------------------
-VERSION = "1.0.0"          # version locale du logiciel (comparée aux tags GitHub)
+VERSION = "1.0.1"          # version locale du logiciel (comparée aux tags GitHub)
 PROJECT_REPO = "Julien684/btrfsmgr"
 PROJECT_REPO_URL = f"https://github.com/{PROJECT_REPO}.git"
 PROJECT_API = f"https://api.github.com/repos/{PROJECT_REPO}"
@@ -1054,13 +1054,14 @@ def install_snap_script() -> str:
 
 
 def write_timer_files(root: str, snapdir: str, tag: str, schedule: str,
-                      keep: int, boot: bool = False) -> str:
+                      keep: int, boot: bool = False,
+                      boot_delay: int = 5) -> str:
     """Create service + timer units for automatic snapshots with retention.
 
     `schedule` is an OnCalendar value (e.g. "daily", "weekly", "hourly-*",
     "Mon *-*-* 03:00:00").  `keep` is the number of snapshots to retain.
-    Si `boot` est vrai, le timer tourne au démarrage (OnBootSec) et
-    `schedule` est ignoré.
+    Si `boot` est vrai, le timer tourne `boot_delay` minutes après le
+    démarrage (OnBootSec) et `schedule` est ignoré.
     """
     unit_name = _snap_unit_name(root, snapdir, tag)
     svc = f"{unit_name}.service"
@@ -1086,8 +1087,8 @@ User=root
         f.write(svc_content)
 
     if boot:
-        _trigger = "OnBootSec=5min"
-        _plan = "Au démarrage (OnBootSec=5min)"
+        _trigger = f"OnBootSec={boot_delay}min"
+        _plan = f"Au démarrage ({boot_delay} min après le boot)"
     else:
         _trigger = f"OnCalendar={schedule}"
         _plan = schedule
@@ -1760,6 +1761,7 @@ class TUI:
 
         # -- 2e choix: détail selon la fréquence ---------------------------
         boot = False
+        boot_delay = 5
         schedule = ""
         if freq == "daily":
             # Chaque jour: heure précise OU au démarrage.
@@ -1772,6 +1774,15 @@ class TUI:
             if when == "2":
                 boot = True
                 hour = None
+                # Délai souhaité après le démarrage (en minutes).
+                while True:
+                    d = self.ask("Créer l'instantané combien de minutes "
+                                 "après le démarrage ?", "5")
+                    try:
+                        boot_delay = max(0, int(d))
+                        break
+                    except ValueError:
+                        print("Nombre invalide")
             elif when == "1":
                 hour = self._ask_hour()
             else:
@@ -1814,7 +1825,8 @@ class TUI:
         tag = self.ask("Nom du plan (ex. daily, weekly)", freq)
 
         if boot:
-            plan_desc = "Au démarrage de la machine (OnBootSec=5min)"
+            plan_desc = (f"Au démarrage de la machine "
+                         f"({boot_delay} min après le boot)")
         else:
             plan_desc = f"OnCalendar={schedule}"
         self.confirm(
@@ -1823,7 +1835,7 @@ class TUI:
             f"  Rétention: {keep} instantané(s)\n"
             f"  Cible    : {self.root}/{self.snapdir}")
         write_timer_files(self.root, self.snapdir, tag, schedule, keep,
-                          boot=boot)
+                          boot=boot, boot_delay=boot_delay)
         self.pause()
 
     def do_remove_timer(self):
