@@ -20,7 +20,7 @@ Raccourcis:
   s      Créer un snapshot
   l      Lister les snapshots
   r      Restaurer un snapshot
-  d      Détruire un snapshot
+  d      Supprimer un snapshot
   p      Programmer des snapshots automatiques
   x      Supprimer un timer systemd
   i      Infos système
@@ -1042,11 +1042,13 @@ def install_snap_script() -> str:
 
 
 def write_timer_files(root: str, snapdir: str, tag: str, schedule: str,
-                      keep: int, oneshot: bool = True) -> str:
+                      keep: int, boot: bool = False) -> str:
     """Create service + timer units for automatic snapshots with retention.
 
     `schedule` is an OnCalendar value (e.g. "daily", "weekly", "hourly-*",
     "Mon *-*-* 03:00:00").  `keep` is the number of snapshots to retain.
+    Si `boot` est vrai, le timer tourne au démarrage (OnBootSec) et
+    `schedule` est ignoré.
     """
     unit_name = _snap_unit_name(root, snapdir, tag)
     svc = f"{unit_name}.service"
@@ -1069,11 +1071,17 @@ User=root
     with open(os.path.join(SYSTEMD_SNAPDIR, svc), "w") as f:
         f.write(svc_content)
 
+    if boot:
+        _trigger = "OnBootSec=5min"
+        _plan = "Au démarrage (OnBootSec=5min)"
+    else:
+        _trigger = f"OnCalendar={schedule}"
+        _plan = schedule
     tmr_content = f"""[Unit]
 Description={APP} — timer snapshots de {root} ({tag})
 
 [Timer]
-OnCalendar={schedule}
+{_trigger}
 Persistent=true
 Unit={svc}
 
@@ -1089,7 +1097,7 @@ WantedBy=timers.target
     rc, out = run(["systemctl", "enable", "--now", tmr], check=False)
     if rc == 0:
         print(f"Timer activé: {tmr}")
-        print(f"  Planning:  {schedule}")
+        print(f"  Planning:  {_plan}")
         print(f"  Rétention: {keep} snapshots")
     else:
         print(f"Échec de l'activation du timer: {out.strip()}")
@@ -1658,7 +1666,7 @@ class TUI:
                 "Créer un instantané",
                 "Lister les instantanés",
                 "Restaurer un instantané",
-                "Détruire un instantané",
+                "Supprimer un instantané",
                 "Programmer des instantanés automatiques (systemd)",
                 "Supprimer une automatisation (timer systemd)",
                 "Rétention : conserver les N plus récents",
@@ -1708,20 +1716,97 @@ class TUI:
                     "N = plus récent → moins récent")
         self.pause()
 
+    def _ask_hour(self) -> int:
+        """Demander une heure (0-23) avec minute 00, défaut 03:00."""
+        while True:
+            h = self.ask("Heure (0-23)", "3")
+            try:
+                h = int(h)
+            except ValueError:
+                print("Heure invalide (0-23)"); continue
+            if 0 <= h <= 23:
+                return h
+            print("Heure invalide (0-23)")
+
     def do_schedule(self):
-        tag = self.ask("Nom du plan (ex. daily, weekly)", "daily")
-        sched = self.ask("Planning systemd (OnCalendar)", "daily")
-        keep = self.ask("Nombre de snapshots à conserver", "7")
+        # -- 1er choix: fréquence -------------------------------------------
+        self.render(
+            " Programmer des instantanés automatiques — fréquence",
+            ["Chaque jour", "Chaque semaine", "Chaque mois"],
+            "Choisir la fréquence",
+        )
+        freq = self.ask("Fréquence", "1")
+        freq_map = {"1": "daily", "2": "weekly", "3": "monthly"}
+        if freq not in freq_map:
+            print("Choix invalide"); self.pause(); return
+        freq = freq_map[freq]
+
+        # -- 2e choix: détail selon la fréquence ---------------------------
+        boot = False
+        schedule = ""
+        if freq == "daily":
+            # Chaque jour: heure précise OU au démarrage.
+            self.render(
+                " Chaque jour",
+                ["À une heure précise", "Au démarrage de la machine"],
+                "Choisir le moment",
+            )
+            when = self.ask("Quand", "1")
+            if when == "2":
+                boot = True
+                hour = None
+            elif when == "1":
+                hour = self._ask_hour()
+            else:
+                print("Choix invalide"); self.pause(); return
+            schedule = f"*-*-* {hour:02d}:00:00" if not boot else ""
+        elif freq == "weekly":
+            # Chaque semaine: demander le jour de la semaine + l'heure.
+            days = ["lundi", "mardi", "mercredi", "jeudi",
+                    "vendredi", "samedi", "dimanche"]
+            self.render(" Chaque semaine — jour", days, "Choisir le jour")
+            d = self.ask("Jour de la semaine", "1")
+            try:
+                idx = int(d) - 1
+            except ValueError:
+                idx = -1
+            if not 0 <= idx < 7:
+                print("Choix invalide"); self.pause(); return
+            day_abbr = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][idx]
+            hour = self._ask_hour()
+            schedule = f"{day_abbr} *-*-* {hour:02d}:00:00"
+        elif freq == "monthly":
+            # Chaque mois: demander le numéro du jour dans le mois + l'heure.
+            j = self.ask("Numéro du jour dans le mois (1-31)", "1")
+            try:
+                daynum = int(j)
+            except ValueError:
+                daynum = 0
+            if not 1 <= daynum <= 31:
+                print("Choix invalide (1-31)"); self.pause(); return
+            hour = self._ask_hour()
+            schedule = f"*-*-{daynum} {hour:02d}:00:00"
+
+        # -- 3e choix: nombre de snapshots à conserver ----------------------
+        keep = self.ask("Nombre d'instantanés à conserver", "7")
         try:
             keep = max(0, int(keep))
         except ValueError:
             print("Nombre invalide"); self.pause(); return
+
+        tag = self.ask("Nom du plan (ex. daily, weekly)", freq)
+
+        if boot:
+            plan_desc = "Au démarrage de la machine (OnBootSec=5min)"
+        else:
+            plan_desc = f"OnCalendar={schedule}"
         self.confirm(
             f"Créer un timer systemd '{tag}'\n"
-            f"  Planning : {sched}\n"
-            f"  Rétention: {keep} snapshot(s)\n"
+            f"  Planning : {plan_desc}\n"
+            f"  Rétention: {keep} instantané(s)\n"
             f"  Cible    : {self.root}/{self.snapdir}")
-        write_timer_files(self.root, self.snapdir, tag, sched, keep)
+        write_timer_files(self.root, self.snapdir, tag, schedule, keep,
+                          boot=boot)
         self.pause()
 
     def do_remove_timer(self):

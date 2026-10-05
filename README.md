@@ -49,7 +49,7 @@ de sous-volumes (deux `mv`).
 | 1 | Créer un instantané (read-only) dans `@snapshots/` |
 | 2 | Listez les instantanés + autres sous-volumes |
 | 3 | Restaurer : swap CoW (deux `mv`) — le snapshot devient `@`, l'ancien `@` est conservé dans `snapshots/@_old-<date-heure>` (tout est CoW, rien n'est copié) |
-| 4 | Détruire un instantané (un seul, plusieurs `1,3,5`, ou `tous`) |
+| 4 | Supprimer un instantané (un seul, plusieurs `1,3,5`, ou `tous`) |
 | 5 | Programmer des snapshots automatiques (timer systemd) avec planning `OnCalendar` (ex. `daily`, `weekly`, `Mon *-*-* 03:00:00`) et rétention (conserver les N plus récents, supprimer les plus anciens) |
 | 6 | Supprimer une automatisation (timer systemd) |
 | 7 | Rétention manuelle : supprimer tous les snapshots sauf les N plus récents |
