@@ -79,6 +79,10 @@ if [[ -z "$ROOT" || -z "$NAME" ]]; then
     exit 1
 fi
 
+# Le nom peut contenir un format strftime (ex. savejour-%Y%m%d-%H%M%S,
+# fourni tel quel par l'unité systemd): on l'expand en timestamp réel.
+NAME="$(date +"$NAME")"
+
 dev_of() {
     findmnt -n -o SOURCE "$1" 2>/dev/null | head -1 | cut -d'[' -f1
 }
@@ -1056,7 +1060,9 @@ def write_timer_files(root: str, snapdir: str, tag: str, schedule: str,
     os.makedirs(SYSTEMD_SNAPDIR, exist_ok=True)
 
     # Script shell (pas de dépendance python) exécuté par l'unité systemd.
-    # `%Y%m%d-%H%M%S` est remplacé par systemd avec le timestamp (OnCalendar).
+    # On écrit "%%Y%%m%%d-%%H%%M%%S" (doublé) pour que systemd ne l'interprète
+    # PAS comme des spécificateurs: le script reçoit "%Y%m%d-%H%M%S" et
+    # l'expand lui-même avec `date` (timestamp de l'exécution).
     script_path = install_snap_script()
     svc_content = f"""[Unit]
 Description={APP} — snapshot btrfs de {root} ({tag})
@@ -1064,7 +1070,7 @@ DefaultDependencies=no
 
 [Service]
 Type=oneshot
-ExecStart={script_path} {root} {snapdir} {tag}-%Y%m%d-%H%M%S {keep}
+ExecStart={script_path} {root} {snapdir} {tag}-%%Y%%m%%d-%%H%%M%%S {keep}
 RemainAfterExit=no
 User=root
 """
@@ -1127,8 +1133,11 @@ def list_timers() -> list[dict]:
         parts = line.split()
         if len(parts) < 4:
             continue
+        # La colonne UNIT (timer) est celle qui se termine par ".timer" ;
+        # parts[-1] est ACTIVATES (le .service), parts[-2] l'unité timer.
+        tname = next((p for p in parts if p.endswith(".timer")), parts[-2])
         rows.append({"next": parts[0], "last": parts[1],
-                     "activated": parts[2], "timer": parts[-1]})
+                     "activated": parts[2], "timer": tname})
     return rows
 
 
