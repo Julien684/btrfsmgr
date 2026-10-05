@@ -62,7 +62,7 @@ APP = "btrfsmgr"
 # ---------------------------------------------------------------------------
 # Version / mise à jour
 # ---------------------------------------------------------------------------
-VERSION = "1.0.1"          # version locale du logiciel (comparée aux tags GitHub)
+VERSION = "1.0.2"          # version locale du logiciel (comparée aux tags GitHub)
 PROJECT_REPO = "Julien684/btrfsmgr"
 PROJECT_REPO_URL = f"https://github.com/{PROJECT_REPO}.git"
 PROJECT_API = f"https://api.github.com/repos/{PROJECT_REPO}"
