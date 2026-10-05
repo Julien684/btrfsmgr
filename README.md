@@ -24,6 +24,26 @@ restauration, et entrées de boot GRUB / systemd-boot.
 
 ## Installation
 
+### Via paquet eopkg (Solus)
+
+```sh
+# Installation (paquet du dossier, ou téléchargé depuis GitHub)
+sudo eopkg install btrfsmgr-1.0.4-1-1-x86_64.eopkg
+
+# Téléchargement direct du paquet depuis GitHub :
+curl -fsSL -o btrfsmgr-1.0.4-1-1-x86_64.eopkg \
+  https://raw.githubusercontent.com/Julien684/btrfsmgr/main/btrfsmgr-1.0.4-1-1-x86_64.eopkg
+sudo eopkg install btrfsmgr-1.0.4-1-1-x86_64.eopkg
+
+# Désinstallation
+sudo eopkg remove btrfsmgr
+```
+
+> **Testé et fonctionnel** : l'installation et la désinstallation via eopkg
+> ont été vérifiées sur Solus 4.9 (eopkg 5.0.0).
+
+### Via le script (toute distribution Linux)
+
 ```sh
 # 1. Cloner le dépôt
 git clone https://github.com/Julien684/btrfsmgr.git
