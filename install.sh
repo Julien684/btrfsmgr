@@ -67,7 +67,7 @@ if ! command -v clr-boot-manager >/dev/null; then
 fi
 
 echo
-echo "Lancer     :  btrfsmgr              (interface TUI, sous-volume /)"
-echo "ou         :  btrfsmgr /chemin      (autre sous-volume BTRFS)"
+echo "Lancer           :  btrfsmgr              (interface TUI, sous-volume /)"
+echo "ou               :  btrfsmgr /chemin      (autre sous-volume BTRFS)"
 echo "Mettre à jour    :  btrfsmgr update"
-echo "Désinstall :  btrfsmgr uninstall    (root; conserve les snapshots)"
+echo "Désinstaller     :  btrfsmgr uninstall    (root; conserve les snapshots)"

@@ -81,6 +81,22 @@ btrfsmgr update
 | 9 | Menu systemd-boot : afficher/masquer le menu au démarrage (timeout) |
 | 10 | Quitter |
 
+## État des tests
+
+Fonctionnalités **testées et fonctionnelles** :
+
+* Création d'un instantané
+* Lister les instantanés
+* Supprimer un instantané
+* Supprimer une automatisation (timer systemd)
+* Infos système (chargeur de boot, timers…)
+* Menu systemd-boot : afficher/masquer au démarrage
+
+Fonctionnalité **en cours de test** :
+
+* Programmer des instantanés automatiques (systemd) avec toutes les
+  possibilités et la suppression automatique (rétention).
+
 ## Timers systemd
 
 `btrfsmgr` crée (menu 5) :
