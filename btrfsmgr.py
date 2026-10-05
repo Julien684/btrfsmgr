@@ -62,7 +62,7 @@ APP = "btrfsmgr"
 # ---------------------------------------------------------------------------
 # Version / mise à jour
 # ---------------------------------------------------------------------------
-VERSION = "1.0.2"          # version locale du logiciel (comparée aux tags GitHub)
+VERSION = "1.0.3"          # version locale du logiciel (comparée aux tags GitHub)
 PROJECT_REPO = "Julien684/btrfsmgr"
 PROJECT_REPO_URL = f"https://github.com/{PROJECT_REPO}.git"
 PROJECT_API = f"https://api.github.com/repos/{PROJECT_REPO}"
@@ -208,11 +208,21 @@ fi
 echo "[btrfsmgr-snap] créant: $ROOT → $target"
 btrfs subvolume snapshot "$ROOT" "$target"
 echo "[btrfsmgr-snap] OK: $target"
-# Notification graphique (si notify-send est dispo — GNOME/KDE)
-if command -v notify-send >/dev/null 2>&1; then
-    notify-send "BTRFS Manager" \
-        "Instantané créé: $SNAPDIR/$NAME" \
-        -i system-software-update 2>/dev/null || true
+# Notification graphique aux utilisateurs connectés.
+# Le service tourne en ROOT: `notify-send` seul s'exécute dans la session
+# root (sans bus DBus) et n'atteint PAS le bureau.  On envoie donc la
+# notification via le bus de session de chaque utilisateur graphique.
+if command -v notify-send >/dev/null 2>&1 \
+   && command -v loginctl >/dev/null 2>&1; then
+    for _u in $(loginctl list-users --no-legend 2>/dev/null | awk '{print $2}'); do
+        _uid=$(id -u "$_u" 2>/dev/null) || continue
+        _bus="/run/user/$_uid/bus"
+        [ -S "$_bus" ] || continue
+        DBUS_SESSION_BUS_ADDRESS="unix:path=$_bus" DISPLAY=:0 \
+            su -s /bin/sh "$_u" -c \
+            "notify-send -i chronometer 'BTRFS Manager' \
+             'Instantané créé: $SNAPDIR/$NAME'" 2>/dev/null || true
+    done
 fi
 prune_snapshots "$ROOT" "$SNAPDIR" "$KEEP"
 """
@@ -1043,7 +1053,7 @@ def install_snap_script() -> str:
                     "Comment=Gérer les sous-volumes BTRFS — snapshots, "
                     "restauration, automation\n"
                     "Exec=/usr/local/bin/btrfsmgr\n"
-                    "Icon=system-software-update\n"
+                    "Icon=chronometer\n"
                     "Terminal=true\n"
                     "Categories=System;Filesystem;\n"
                 )

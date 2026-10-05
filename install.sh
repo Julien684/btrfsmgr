@@ -39,7 +39,7 @@ Type=Application
 Name=BTRFS Manager
 Comment=Gérer les sous-volumes BTRFS — snapshots, restauration, automation
 Exec=/bin/btrfsmgr
-Icon=system-software-update
+Icon=chronometer
 Terminal=true
 Categories=System;Filesystem;
 DESKTOP
