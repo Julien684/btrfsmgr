@@ -62,7 +62,7 @@ APP = "btrfsmgr"
 # ---------------------------------------------------------------------------
 # Version / mise à jour
 # ---------------------------------------------------------------------------
-VERSION = "1.0.3"          # version locale du logiciel (comparée aux tags GitHub)
+VERSION = "1.0.4"          # version locale du logiciel (comparée aux tags GitHub)
 PROJECT_REPO = "Julien684/btrfsmgr"
 PROJECT_REPO_URL = f"https://github.com/{PROJECT_REPO}.git"
 PROJECT_API = f"https://api.github.com/repos/{PROJECT_REPO}"
@@ -225,6 +225,15 @@ if command -v notify-send >/dev/null 2>&1 \
     done
 fi
 prune_snapshots "$ROOT" "$SNAPDIR" "$KEEP"
+
+# Resynchroniser les entrées systemd-boot (comme en création manuelle):
+# ajouter le nouveau snapshot, retirer les .conf des snapshots prunés.
+# No-op silencieux si le chargeur n'est pas systemd-boot.
+for _bm in $(command -v btrfsmgr) /bin/btrfsmgr /usr/local/bin/btrfsmgr; do
+    [[ -x "$_bm" ]] || continue
+    "$_bm" sync "$ROOT" --snapdir "$SNAPDIR" || true
+    break
+done
 """
 
 
