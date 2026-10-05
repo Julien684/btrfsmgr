@@ -59,6 +59,14 @@ DESKTOP_FILE = "/usr/share/applications/btrfsmgr.desktop"
 
 APP = "btrfsmgr"
 
+# ---------------------------------------------------------------------------
+# Version / mise à jour
+# ---------------------------------------------------------------------------
+VERSION = "1.0.0"          # version locale du logiciel (comparée aux tags GitHub)
+PROJECT_REPO = "Julien684/btrfsmgr"
+PROJECT_REPO_URL = f"https://github.com/{PROJECT_REPO}.git"
+PROJECT_API = f"https://api.github.com/repos/{PROJECT_REPO}"
+
 # Dossier des snapshots, créé au même niveau que @ et @home
 DEFAULT_SNAPDIR = "snapshots"
 
@@ -1670,7 +1678,7 @@ class TUI:
     # -- screens ------------------------------------------------------------
     def main_menu(self):
         self.render(
-            f" Unofficial Solus BTRFS Manager — {self.root}",
+            f" Unofficial Solus BTRFS Manager v{VERSION} — {self.root}",
             [
                 "Créer un instantané",
                 "Lister les instantanés",
@@ -1990,6 +1998,7 @@ class TUI:
         timers = list_timers()
         snaps = list_snapshots(self.root, self.snapdir)
         items = [
+            f"Version              : {APP} {VERSION}",
             f"Chargeur de boot      : {bl}",
             f"Subvolume par défaut  : {dv['full'] or '?'}",
             f"Snapshots existants   : {len(snaps)}",
@@ -2113,15 +2122,142 @@ def cli(args) -> int:
     return 0
 
 
+def _version_key(v) -> tuple:
+    """Convertir une chaîne de version en tuple comparable (major, minor, patch)."""
+    m = re.match(r"v?(\d+)(?:\.(\d+))?(?:\.(\d+))?", str(v or "").strip())
+    if not m:
+        return (0, 0, 0)
+    return tuple(int(m.group(i) or 0) for i in (1, 2, 3))
+
+
+def _repo_url(src: str) -> str:
+    """URL du dépôt Git (avec identifiants éventuels) pour cloner/lister les tags.
+
+    Si on tourne depuis un clone git qui a un `origin`, on le réutilise
+    (utile pour un dépôt privé); sinon on retombe sur l'URL publique connue.
+    """
+    if os.path.isdir(os.path.join(src, ".git")):
+        rc, out = run(["git", "-C", src, "remote", "get-url", "origin"],
+                      check=False)
+        if rc == 0 and out.strip():
+            return out.strip()
+    return PROJECT_REPO_URL
+
+
+def _github_tags(repo_url: str) -> list:
+    """Liste des tags du dépôt (API GitHub puis fallback `git ls-remote`)."""
+    import json
+    import urllib.request
+    try:
+        req = urllib.request.Request(
+            f"{PROJECT_API}/tags",
+            headers={"User-Agent": "btrfsmgr",
+                     "Accept": "application/vnd.github+json"})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            data = json.load(r)
+            return [d.get("name", "") for d in data if isinstance(d, dict)
+                    and d.get("name")]
+    except Exception:
+        pass
+    try:
+        rc, out = run(["git", "ls-remote", "--tags", repo_url], check=False)
+        if rc == 0:
+            names = []
+            for ln in out.splitlines():
+                ref = ln.split()[-1]
+                if ref.endswith("^{}"):
+                    continue
+                names.append(ref.rsplit("/", 1)[-1])
+            return names
+    except Exception:
+        pass
+    return []
+
+
+def _latest_remote_version(repo_url: str) -> str | None:
+    """Dernière version (tag) disponible sur GitHub, None si aucune/indisponible."""
+    best = None
+    for t in _github_tags(repo_url):
+        if not t or not str(t)[0:1].isdigit():
+            continue
+        v = str(t).lstrip("vV")
+        if best is None or _version_key(v) > _version_key(best):
+            best = v
+    return best
+
+
+def _confirm(prompt: str) -> bool:
+    try:
+        val = input(f"{prompt} [o/N]: ").strip().lower()
+    except EOFError:
+        return False
+    return val in ("o", "oui", "y", "yes")
+
+
+def _run_install(src: str) -> int:
+    script = os.path.join(src, "install.sh")
+    if not os.path.exists(script):
+        print(f"ERREUR: {script} introuvable.")
+        return 1
+    print("Mise à jour — lancement de install.sh :")
+    return subprocess.run(["bash", script]).returncode
+
+
+def _perform_update(repo_url: str, remote: str) -> int:
+    """Récupérer le code de la version à jour en clone temporaire et
+    l'installer (install.sh).  Le dépôt de travail de l'utilisateur n'est
+    jamais modifié."""
+    import shutil
+    import tempfile
+    tag = f"v{remote}"
+    tmp = tempfile.mkdtemp(prefix="btrfsmgr-update-")
+    print(f"Récupération de la version {remote} ({tag}) depuis GitHub…")
+    r = subprocess.run(["git", "clone", "--depth", "1", "--branch", tag,
+                        repo_url, tmp], capture_output=True, text=True)
+    if r.returncode != 0:
+        print("ERREUR: clone GitHub échoué.")
+        print((r.stderr or "").strip())
+        shutil.rmtree(tmp, ignore_errors=True)
+        return 1
+    code = _run_install(tmp)
+    shutil.rmtree(tmp, ignore_errors=True)
+    return code
+
+
 def cli_update(args) -> int:
-    """Relancer install.sh avec le répertoire source (si fourni)."""
-    src = args.src or os.path.dirname(os.path.abspath(sys.argv[0]))
+    """Mise à jour.  Vérifie la dernière version sur GitHub; si une version
+    supérieure à la locale est disponible, propose de mettre à jour puis
+    réinstalle.  Sans mise à jour (ou hors ligne), relance install.sh du
+    dépôt local fourni (comportement historique)."""
+    local = VERSION
+    src = args.src or os.path.dirname(os.path.abspath(__file__))
+    repo_url = _repo_url(src)
+    print(f"{APP} {local}")
+
+    remote = _latest_remote_version(repo_url)
+    if remote is not None:
+        print(f"  Dernière version GitHub : {remote}")
+        if _version_key(local) < _version_key(remote):
+            print(f"  Une mise à jour est disponible : {local} → {remote}")
+            if _confirm("Mettre à jour maintenant ?"):
+                return _perform_update(repo_url, remote)
+            print("Annulé.")
+            return 0
+        print("  Vous êtes déjà à jour.")
+        if os.path.isfile(os.path.join(src, "install.sh")):
+            print("  (version à jour — réinstallation locale possible)")
+            if _confirm("Réinstaller depuis le dépôt local quand même ?"):
+                return _run_install(src)
+        return 0
+
+    # Pas de réseau / dépôt sans tag: comportement historique (install local).
+    print("  Version GitHub indisponible (hors ligne ou dépôt sans tag).")
     script = os.path.join(src, "install.sh")
     if not os.path.exists(script):
         print(f"ERREUR: {script} introuvable.")
         print(f"  Utiliser: btrfsmgr update /chemin/vers/le/depot")
         return 1
-    print("Mise à jour — relance de install.sh:")
+    print("Réinstallation — relance de install.sh :")
     r = subprocess.run(["bash", script])
     return r.returncode
 
@@ -2210,6 +2346,8 @@ def main():
     ap.add_argument("--snapdir", default=DEFAULT_SNAPDIR,
                     help="Dossier des snapshots, au même niveau que @ et @home "
                          f"(défaut: {DEFAULT_SNAPDIR})")
+    ap.add_argument("--version", "-V", action="version",
+                    version=f"{APP} {VERSION}")
     ap.add_argument("--name", default=None,
                     help="Nom du snapshot (auto seulement)")
     ap.add_argument("--keep", type=int, default=7,
