@@ -62,10 +62,10 @@ APP = "btrfsmgr"
 # ---------------------------------------------------------------------------
 # Version / mise à jour
 # ---------------------------------------------------------------------------
-VERSION = "1.0.4"          # version locale du logiciel (comparée aux tags GitHub)
-PROJECT_REPO = "Julien684/btrfsmgr"
-PROJECT_REPO_URL = f"https://github.com/{PROJECT_REPO}.git"
-PROJECT_API = f"https://api.github.com/repos/{PROJECT_REPO}"
+VERSION = "1.0.5"          # version locale du logiciel (comparée aux tags Gitea)
+PROJECT_REPO = "Linuxon/btrfsmgr"
+PROJECT_REPO_URL = "https://depoa.julien68.fr/Linuxon/btrfsmgr.git"
+PROJECT_API = "https://depoa.julien68.fr/api/v1/repos/Linuxon/btrfsmgr"
 
 # Dossier des snapshots, créé au même niveau que @ et @home
 DEFAULT_SNAPDIR = "snapshots"
@@ -2164,26 +2164,27 @@ def _version_key(v) -> tuple:
 def _repo_url(src: str) -> str:
     """URL du dépôt Git (avec identifiants éventuels) pour cloner/lister les tags.
 
-    Si on tourne depuis un clone git qui a un `origin`, on le réutilise
-    (utile pour un dépôt privé); sinon on retombe sur l'URL publique connue.
+    On privilégie un remote nommé `gitea` si le dépôt local en a un (le
+    plus à jour / avec identifiants); sinon on retombe sur l'URL publique
+    Gitea connue (PROJECT_REPO_URL).
     """
     if os.path.isdir(os.path.join(src, ".git")):
-        rc, out = run(["git", "-C", src, "remote", "get-url", "origin"],
+        rc, out = run(["git", "-C", src, "remote", "get-url", "gitea"],
                       check=False)
         if rc == 0 and out.strip():
             return out.strip()
     return PROJECT_REPO_URL
 
 
-def _github_tags(repo_url: str) -> list:
-    """Liste des tags du dépôt (API GitHub puis fallback `git ls-remote`)."""
+def _gitea_tags(repo_url: str) -> list:
+    """Liste des tags du dépôt (API Gitea puis fallback `git ls-remote`)."""
     import json
     import urllib.request
     try:
         req = urllib.request.Request(
             f"{PROJECT_API}/tags",
             headers={"User-Agent": "btrfsmgr",
-                     "Accept": "application/vnd.github+json"})
+                     "Accept": "application/json"})
         with urllib.request.urlopen(req, timeout=10) as r:
             data = json.load(r)
             return [d.get("name", "") for d in data if isinstance(d, dict)
@@ -2206,9 +2207,9 @@ def _github_tags(repo_url: str) -> list:
 
 
 def _latest_remote_version(repo_url: str) -> str | None:
-    """Dernière version (tag) disponible sur GitHub, None si aucune/indisponible."""
+    """Dernière version (tag) disponible sur Gitea, None si aucune/indisponible."""
     best = None
-    for t in _github_tags(repo_url):
+    for t in _gitea_tags(repo_url):
         if not t:
             continue
         v = str(t).strip().lstrip("vV")
@@ -2244,11 +2245,11 @@ def _perform_update(repo_url: str, remote: str) -> int:
     import tempfile
     tag = f"v{remote}"
     tmp = tempfile.mkdtemp(prefix="btrfsmgr-update-")
-    print(f"Récupération de la version {remote} ({tag}) depuis GitHub…")
+    print(f"Récupération de la version {remote} ({tag}) depuis Gitea…")
     r = subprocess.run(["git", "clone", "--depth", "1", "--branch", tag,
                         repo_url, tmp], capture_output=True, text=True)
     if r.returncode != 0:
-        print("ERREUR: clone GitHub échoué.")
+        print("ERREUR: clone Gitea échoué.")
         print((r.stderr or "").strip())
         shutil.rmtree(tmp, ignore_errors=True)
         return 1
@@ -2258,7 +2259,7 @@ def _perform_update(repo_url: str, remote: str) -> int:
 
 
 def cli_update(args) -> int:
-    """Mise à jour.  Vérifie la dernière version sur GitHub; si une version
+    """Mise à jour.  Vérifie la dernière version sur Gitea; si une version
     supérieure à la locale est disponible, propose de mettre à jour puis
     réinstalle.  Sans mise à jour (ou hors ligne), relance install.sh du
     dépôt local fourni (comportement historique)."""
@@ -2269,7 +2270,7 @@ def cli_update(args) -> int:
 
     remote = _latest_remote_version(repo_url)
     if remote is not None:
-        print(f"  Dernière version GitHub : {remote}")
+        print(f"  Dernière version Gitea : {remote}")
         if _version_key(local) < _version_key(remote):
             print(f"  Une mise à jour est disponible : {local} → {remote}")
             if _confirm("Mettre à jour maintenant ?"):
@@ -2284,7 +2285,7 @@ def cli_update(args) -> int:
         return 0
 
     # Pas de réseau / dépôt sans tag: comportement historique (install local).
-    print("  Version GitHub indisponible (hors ligne ou dépôt sans tag).")
+    print("  Version Gitea indisponible (hors ligne ou dépôt sans tag).")
     script = os.path.join(src, "install.sh")
     if not os.path.exists(script):
         print(f"ERREUR: {script} introuvable.")
