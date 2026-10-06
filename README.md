@@ -24,17 +24,14 @@ restauration, et entrées de boot GRUB / systemd-boot.
 
 ## Installation
 
-### Via paquet eopkg (Solus)
+### Installation via paquet eopkg (Solus)
 
 ```sh
-# Installation (paquet du dossier, ou téléchargé depuis GitHub)
-sudo eopkg install btrfsmgr-1.0.4-1-1-x86_64.eopkg
-
-# Téléchargement direct du paquet depuis GitHub :
-curl -fsSL -o btrfsmgr-1.0.4-1-1-x86_64.eopkg \
-  https://raw.githubusercontent.com/Julien684/btrfsmgr/main/btrfsmgr-1.0.4-1-1-x86_64.eopkg
-sudo eopkg install btrfsmgr-1.0.4-1-1-x86_64.eopkg
-
+# Téléchargement et installation direct du paquet depuis GitHub :
+sudo eopkg install https://raw.githubusercontent.com/Julien684/btrfsmgr/main/btrfsmgr-1.0.4-1-1-x86_64.eopkg
+```
+### Désinstallation via paquet eopkg (Solus)
+```sh
 # Désinstallation
 sudo eopkg remove btrfsmgr
 ```
@@ -42,7 +39,7 @@ sudo eopkg remove btrfsmgr
 > **Testé et fonctionnel** : l'installation et la désinstallation via eopkg
 > ont été vérifiées sur Solus 4.9 (eopkg 5.0.0).
 
-### Via le script (toute distribution Linux)
+### Installation via le script (toute distribution Linux)
 
 ```sh
 # 1. Cloner le dépôt
@@ -51,10 +48,16 @@ cd btrfsmgr
 
 # 2. Installer
 sudo ./install.sh
+```
+### Désinstallation via le script (toute distribution Linux)
 
-# 3. Utiliser
-btrfsmgr                 # gère le sous-volume /
-btrfsmgr /mnt/backup     # gère un autre sous-volume BTRFS
+```sh
+sudo btrfsmgr uninstall
+```
+# 3. Utilisation
+```sh
+sudo btrfsmgr                 # gère le sous-volume /
+sudo btrfsmgr /mnt/backup     # gère un autre sous-volume BTRFS
 ```
 
 Dépendances : `btrfs-progs`, `python3 ≥ 3.8`, `systemd` (timers).
