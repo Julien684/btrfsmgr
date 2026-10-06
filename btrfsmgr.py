@@ -62,10 +62,196 @@ APP = "btrfsmgr"
 # ---------------------------------------------------------------------------
 # Version / mise à jour
 # ---------------------------------------------------------------------------
-VERSION = "1.0.5"          # version locale du logiciel (comparée aux tags Gitea)
+VERSION = "1.0.6"          # version locale du logiciel (comparée aux tags Gitea)
 PROJECT_REPO = "Linuxon/btrfsmgr"
 PROJECT_REPO_URL = "https://depoa.julien68.fr/Linuxon/btrfsmgr.git"
 PROJECT_API = "https://depoa.julien68.fr/api/v1/repos/Linuxon/btrfsmgr"
+
+# ---------------------------------------------------------------------------
+# Internationalisation (FR par défaut, EN automatique selon la langue système)
+# ---------------------------------------------------------------------------
+# La langue est détectée automatiquement depuis les variables d'environnement
+# standard de locale (LANGUAGE, LC_ALL, LC_MESSAGES, LANG), dans cet ordre de
+# priorité.  FR est le défaut si rien n'est détecté.  On peut forcer avec:
+#   LANGUAGE=en btrfsmgr      (ou LC_ALL=en_US.UTF-8, LANG=fr_FR.UTF-8, …)
+def _detect_language() -> str:
+    for var in ("LANGUAGE", "LC_ALL", "LC_MESSAGES", "LANG"):
+        v = (os.environ.get(var) or "").lower()
+        if v:
+            if v.startswith("en"):
+                return "en"
+            if v.startswith("fr"):
+                return "fr"
+    return "fr"
+
+
+LANGUAGE = _detect_language()
+
+# Table de traduction EN (clé = chaîne FR source, valeur = EN).
+_EN = {
+    # --- menu principal ----------------------------------------------------
+    " Unofficial Solus BTRFS Manager v{ver} — {root}":
+        " Unofficial Solus BTRFS Manager v{ver} — {root}",
+    "Créer un instantané": "Create a snapshot",
+    "Lister les instantanés": "List snapshots",
+    "Restaurer un instantané": "Restore a snapshot",
+    "Supprimer un instantané": "Delete a snapshot",
+    "Programmer des instantanés automatiques (systemd)":
+        "Schedule automatic snapshots (systemd)",
+    "Supprimer une automatisation (timer systemd)":
+        "Remove an automation (systemd timer)",
+    "Rétention : conserver les N plus récents":
+        "Retention: keep the N most recent",
+    "Infos système (chargeur de boot, timers…)":
+        "System info (bootloader, timers…)",
+    "Menu systemd-boot : afficher/masquer au démarrage":
+        "systemd-boot menu: show/hide at boot",
+    "Quitter": "Quit",
+    "0-10 ou lettre · 10/q quitter": "0-10 or letter · 10/q quit",
+    "Choix": "Choice",
+    "Fréquence": "Frequency",
+    "Choix invalide": "Invalid choice",
+    "Choix invalide.": "Invalid choice.",
+    "Nombre invalide": "Invalid number",
+    "Nombre invalide (0-23)": "Invalid hour (0-23)",
+    "Heure (0-23)": "Hour (0-23)",
+    "Heure invalide (0-23)": "Invalid hour (0-23)",
+    "Quand": "When",
+    "Nom du snapshot": "Snapshot name",
+    "Nom du plan (ex. daily, weekly)": "Plan name (e.g. daily, weekly)",
+    "Au revoir.": "Goodbye.",
+    "\nAu revoir.": "\nGoodbye.",
+
+    # --- création / liste -------------------------------------------------
+    "Créer un snapshot de {root} → {snapdir}/{name}":
+        "Create a snapshot of {root} → {snapdir}/{name}",
+    " Snapshots — {root}/{snapdir}": " Snapshots — {root}/{snapdir}",
+    "(aucun snapshot)": "(no snapshots)",
+    "Autres sous-volumes:": "Other subvolumes:",
+    " Snapshots — {root}/{snapdir}  ({n} snapshot(s))":
+        " Snapshots — {root}/{snapdir}  ({n} snapshot(s))",
+    "N = plus récent → moins récent": "N = newest → oldest",
+
+    # --- programmation ------------------------------------------------------
+    " Programmer des instantanés automatiques — fréquence":
+        " Schedule automatic snapshots — frequency",
+    "Chaque jour": "Every day",
+    "Chaque semaine": "Every week",
+    "Chaque mois": "Every month",
+    "Choisir la fréquence": "Choose the frequency",
+    " Chaque jour": " Every day",
+    "À une heure précise": "At a specific time",
+    "Au démarrage de la machine": "On machine boot",
+    "Choisir le moment": "Choose the moment",
+    "Créer l'instantané combien de minutes après le démarrage ?":
+        "How many minutes after boot should the snapshot be created?",
+    " Chaque semaine — jour": " Every week — day",
+    "Choisir le jour": "Choose the day",
+    "Jour de la semaine": "Day of the week",
+    "lundi": "Monday", "mardi": "Tuesday", "mercredi": "Wednesday",
+    "jeudi": "Thursday", "vendredi": "Friday", "samedi": "Saturday",
+    "dimanche": "Sunday",
+    "Numéro du jour dans le mois (1-31)": "Day number in the month (1-31)",
+    "Choix invalide (1-31)": "Invalid choice (1-31)",
+    "Nombre d'instantanés à conserver": "Number of snapshots to keep",
+    "Au démarrage de la machine ({delay} min après le boot)":
+        "On machine boot ({delay} min after boot)",
+    "Créer un timer systemd '{tag}'\n  Planning : {plan}\n  Rétention: "
+    "{keep} instantané(s)\n  Cible    : {root}/{snapdir}":
+        "Create a systemd timer '{tag}'\n  Schedule : {plan}\n  Retention: "
+        "{keep} snapshot(s)\n  Target   : {root}/{snapdir}",
+
+    # --- suppression automatisation / restauration / suppression -------------------
+    "Aucun timer btrfsmgr actif.": "No active btrfsmgr timer.",
+    " Supprimer une automatisation — {root}": " Remove an automation — {root}",
+    "Choisir le timer à supprimer": "Choose the timer to remove",
+    "Numéro du timer à supprimer": "Number of the timer to remove",
+    "Supprimer l'automatisation '{tag}' ?": "Remove the automation '{tag}'?",
+    "Aucun snapshot à restaurer.": "No snapshot to restore.",
+    " Restaurer — {root}/{snapdir}": " Restore — {root}/{snapdir}",
+    "Choisir un snapshot à restaurer": "Choose a snapshot to restore",
+    "Numéro du snapshot à restaurer": "Number of the snapshot to restore",
+    "(racine du FS)": "(filesystem root)",
+    "Restaurer {snap} en premier plan par deux mv (CoW) ?\n\n"
+    "  1. mv  {at} → {snapdir}/{at}_old-<date-heure>  (conserve l'actuel)\n"
+    "  2. mv  {snapdir}/{snap} → {at}  (le snapshot devient le volume de boot)"
+    "\n\nLe sous-volume courant n'est pas perdu: il reste dans {snapdir}/.\n"
+    "Redémarrez ensuite pour booter sur la version restaurée.":
+        "Restore {snap} to the foreground with two mv (CoW)?\n\n"
+        "  1. mv  {at} → {snapdir}/{at}_old-<date>  (keeps the current)\n"
+        "  2. mv  {snapdir}/{snap} → {at}  (the snapshot becomes the boot "
+        "volume)\n\nThe current subvolume is not lost: it stays in "
+        "{snapdir}/.\nThen reboot to boot on the restored version.",
+    "\nRedémarrer maintenant pour booter sur la version restaurée ?":
+        "\nReboot now to boot on the restored version?",
+    "Aucun snapshot à supprimer.": "No snapshot to delete.",
+    " Supprimer — {root}/{snapdir}": " Delete — {root}/{snapdir}",
+    "un numéro, plusieurs (ex. 1,3,5), ou 'tous'":
+        "a number, several (e.g. 1,3,5), or 'all'",
+    "Numéro(s) du/des snapshot(s) à supprimer (ex. 3, ou 1,2,4, ou 'tous')":
+        "Snapshot number(s) to delete (e.g. 3, or 1,2,4, or 'all')",
+    "Aucune sélection valide.": "No valid selection.",
+    "Supprimer DÉFINITIVEMENT {n} instantané(s) ?":
+        "Permanently delete {n} snapshot(s)?",
+    "  Supprimé: {full}": "  Deleted: {full}",
+    "  Échec: {full} — {err}": "  Failed: {full} — {err}",
+    "{ok}/{n} supprimé(s).": "{ok}/{n} deleted.",
+
+    # --- boot menu / rétention / infos --------------------------------------
+    "Menu systemd-boot au démarrage": "systemd-boot menu at boot",
+    "  clr-boot-manager set-timeout <secondes>":
+        "  clr-boot-manager set-timeout <seconds>",
+    "    N > 0 : le menu est affiché pendant N secondes":
+        "    N > 0 : menu shown for N seconds",
+    "    0     : le menu est masqué (boot direct)":
+        "    0     : menu hidden (direct boot)",
+    "Nombre de secondes d'affichage (0 = masquer le menu)":
+        "Display duration in seconds (0 = hide the menu)",
+    "Nombre invalide (0 ou plus)": "Invalid number (0 or more)",
+    "Appliquer: clr-boot-manager set-timeout {secs}":
+        "Apply: clr-boot-manager set-timeout {secs}",
+    "  ✓ Done (timeout={secs}s).": "  ✓ Done (timeout={secs}s).",
+    "  ✗ Échec: {err}": "  ✗ Failed: {err}",
+    "Conserver les N plus récents snapshots (0=tous)":
+        "Keep the N most recent snapshots (0=all)",
+    "Aucun snapshot à supprimer (déjà ≤ N).":
+        "No snapshot to delete (already ≤ N).",
+    " Rétention — conserver {keep}, supprimer {n}":
+        " Retention — keep {keep}, delete {n}",
+    "Les snapshots listés seront SUPPRIMÉS.":
+        "The listed snapshots will be DELETED.",
+    "Confirmer la suppression ?": "Confirm deletion?",
+    " Infos système": " System info",
+    "Espace disque:": "Disk space:",
+    "Version              : {app} {ver}": "Version              : {app} {ver}",
+    "Chargeur de boot      : {bl}": "Bootloader           : {bl}",
+    "Subvolume par défaut  : {dv}": "Default subvolume    : {dv}",
+    "Snapshots existants   : {n}": "Existing snapshots   : {n}",
+    "Timers {app} actifs  : {n}": "Active {app} timers  : {n}",
+
+    # --- erreurs / divers ------------------------------------------------------
+    "ERREUR: exécuter en root:  sudo btrfsmgr": "ERROR: run as root:  sudo btrfsmgr",
+    "ERREUR: 'btrfs' introuvable. Installez btrfs-progs.":
+        "ERROR: 'btrfs' not found. Install btrfs-progs.",
+    "Warning: ensure_snapdir ignorée: {err}":
+        "Warning: ensure_snapdir ignored: {err}",
+    "NOTE: root /snapshots détecté — restauration impossible sur un "
+    "sous-dossier.  Utilisation de / (racine système).":
+        "NOTE: root /snapshots detected — restore impossible on a subfolder.  "
+        "Using / (system root).",
+}
+
+
+def _(s: str) -> str:
+    """Traduire la chaîne FR visible vers la langue active (défaut FR)."""
+    if LANGUAGE == "en":
+        return _EN.get(s, s)
+    return s
+
+
+def _f(s: str, **kw) -> str:
+    """Traduire puis formater avec les paramètres nommés ({name})."""
+    return _(s).format(**kw)
 
 # Dossier des snapshots, créé au même niveau que @ et @home
 DEFAULT_SNAPDIR = "snapshots"
@@ -1650,9 +1836,9 @@ class TUI:
             return "/"
         # Si le root est un sous-dossier connu (snapdir), on remonte à /
         if r in ("/snapshots", "snapshots"):
-            print("NOTE: root /snapshots détecté — restauration impossible "
-                  "sur un sous-dossier.  Utilisation de / "
-                  "(racine système).")
+            print(_("NOTE: root /snapshots détecté — restauration impossible "
+                    "sur un sous-dossier.  Utilisation de / "
+                    "(racine système)."))
             return "/"
         # Autre cas: on tente de trouver la racine système via le montage
         # Si / est un sous-volume BTRFS, le TUI doit toujours partir de /
@@ -1697,23 +1883,25 @@ class TUI:
 
     # -- screens ------------------------------------------------------------
     def main_menu(self):
+        title = _f(" Unofficial Solus BTRFS Manager v{ver} — {root}",
+                   ver=VERSION, root=self.root)
         self.render(
-            f" Unofficial Solus BTRFS Manager v{VERSION} — {self.root}",
+            title,
             [
-                "Créer un instantané",
-                "Lister les instantanés",
-                "Restaurer un instantané",
-                "Supprimer un instantané",
-                "Programmer des instantanés automatiques (systemd)",
-                "Supprimer une automatisation (timer systemd)",
-                "Rétention : conserver les N plus récents",
-                "Infos système (chargeur de boot, timers…)",
-                "Menu systemd-boot : afficher/masquer au démarrage",
-                "Quitter",
+                _("Créer un instantané"),
+                _("Lister les instantanés"),
+                _("Restaurer un instantané"),
+                _("Supprimer un instantané"),
+                _("Programmer des instantanés automatiques (systemd)"),
+                _("Supprimer une automatisation (timer systemd)"),
+                _("Rétention : conserver les N plus récents"),
+                _("Infos système (chargeur de boot, timers…)"),
+                _("Menu systemd-boot : afficher/masquer au démarrage"),
+                _("Quitter"),
             ],
-            "0-10 ou lettre · 10/q quitter",
+            _("0-10 ou lettre · 10/q quitter"),
         )
-        return self.ask("Choix", "1")
+        return self.ask(_("Choix"), "1")
 
     def sync_boot(self):
         """Synchronise les entrées systemd-boot avec les snapshots présents."""
@@ -1723,8 +1911,9 @@ class TUI:
             print(f"Warning: sync boot ignorée: {e}")
 
     def do_create(self):
-        name = self.ask("Nom du snapshot", now_stamp())
-        self.confirm(f"Créer un snapshot de {self.root} → {self.snapdir}/{name}")
+        name = self.ask(_("Nom du snapshot"), now_stamp())
+        self.confirm(_f("Créer un snapshot de {root} → {snapdir}/{name}",
+                        root=self.root, snapdir=self.snapdir, name=name))
         create_snapshot(self.root, self.snapdir, name)
         self.sync_boot()
         self.pause()
@@ -1732,8 +1921,10 @@ class TUI:
     def do_list(self):
         snaps = list_snapshots(self.root, self.snapdir)
         if not snaps:
-            self.render(f" Snapshots — {self.root}/{self.snapdir}",
-                        ["(aucun snapshot)"])
+            self.render(
+                _f(" Snapshots — {root}/{snapdir}",
+                   root=self.root, snapdir=self.snapdir),
+                [_("(aucun snapshot)")])
             self.pause()
             return
         items = []
@@ -1745,37 +1936,39 @@ class TUI:
                   not s["path"].startswith(self.snapdir + "/")]
         if others:
             items.append("")
-            items.append("Autres sous-volumes:")
+            items.append(_("Autres sous-volumes:"))
             for s in others:
                 items.append(f"      {s['path']}   (gen {s['gen']})")
-        self.render(f" Snapshots — {self.root}/{self.snapdir}  "
-                    f"({len(snaps)} snapshot(s))", items,
-                    "N = plus récent → moins récent")
+        self.render(
+            _f(" Snapshots — {root}/{snapdir}  ({n} snapshot(s))",
+               root=self.root, snapdir=self.snapdir, n=len(snaps)),
+            items,
+            _("N = plus récent → moins récent"))
         self.pause()
 
     def _ask_hour(self) -> int:
         """Demander une heure (0-23) avec minute 00, défaut 03:00."""
         while True:
-            h = self.ask("Heure (0-23)", "3")
+            h = self.ask(_("Heure (0-23)"), "3")
             try:
                 h = int(h)
             except ValueError:
-                print("Heure invalide (0-23)"); continue
+                print(_("Heure invalide (0-23)")); continue
             if 0 <= h <= 23:
                 return h
-            print("Heure invalide (0-23)")
+            print(_("Heure invalide (0-23)"))
 
     def do_schedule(self):
         # -- 1er choix: fréquence -------------------------------------------
         self.render(
-            " Programmer des instantanés automatiques — fréquence",
-            ["Chaque jour", "Chaque semaine", "Chaque mois"],
-            "Choisir la fréquence",
+            _(" Programmer des instantanés automatiques — fréquence"),
+            [_("Chaque jour"), _("Chaque semaine"), _("Chaque mois")],
+            _("Choisir la fréquence"),
         )
-        freq = self.ask("Fréquence", "1")
+        freq = self.ask(_("Fréquence"), "1")
         freq_map = {"1": "daily", "2": "weekly", "3": "monthly"}
         if freq not in freq_map:
-            print("Choix invalide"); self.pause(); return
+            print(_("Choix invalide")); self.pause(); return
         freq = freq_map[freq]
 
         # -- 2e choix: détail selon la fréquence ---------------------------
@@ -1785,74 +1978,77 @@ class TUI:
         if freq == "daily":
             # Chaque jour: heure précise OU au démarrage.
             self.render(
-                " Chaque jour",
-                ["À une heure précise", "Au démarrage de la machine"],
-                "Choisir le moment",
+                _(" Chaque jour"),
+                [_("À une heure précise"), _("Au démarrage de la machine")],
+                _("Choisir le moment"),
             )
-            when = self.ask("Quand", "1")
+            when = self.ask(_("Quand"), "1")
             if when == "2":
                 boot = True
                 hour = None
                 # Délai souhaité après le démarrage (en minutes).
                 while True:
-                    d = self.ask("Créer l'instantané combien de minutes "
-                                 "après le démarrage ?", "5")
+                    d = self.ask(_("Créer l'instantané combien de minutes "
+                                   "après le démarrage ?"), "5")
                     try:
                         boot_delay = max(0, int(d))
                         break
                     except ValueError:
-                        print("Nombre invalide")
+                        print(_("Nombre invalide"))
             elif when == "1":
                 hour = self._ask_hour()
             else:
-                print("Choix invalide"); self.pause(); return
+                print(_("Choix invalide")); self.pause(); return
             schedule = f"*-*-* {hour:02d}:00:00" if not boot else ""
         elif freq == "weekly":
             # Chaque semaine: demander le jour de la semaine + l'heure.
-            days = ["lundi", "mardi", "mercredi", "jeudi",
-                    "vendredi", "samedi", "dimanche"]
-            self.render(" Chaque semaine — jour", days, "Choisir le jour")
-            d = self.ask("Jour de la semaine", "1")
+            days = [_("lundi"), _("mardi"), _("mercredi"), _("jeudi"),
+                    _("vendredi"), _("samedi"), _("dimanche")]
+            self.render(_(" Chaque semaine — jour"), days,
+                        _("Choisir le jour"))
+            d = self.ask(_("Jour de la semaine"), "1")
             try:
                 idx = int(d) - 1
             except ValueError:
                 idx = -1
             if not 0 <= idx < 7:
-                print("Choix invalide"); self.pause(); return
+                print(_("Choix invalide")); self.pause(); return
             day_abbr = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][idx]
             hour = self._ask_hour()
             schedule = f"{day_abbr} *-*-* {hour:02d}:00:00"
         elif freq == "monthly":
-            # Chaque mois: demander le numéro du jour dans le mois + l'heure.
-            j = self.ask("Numéro du jour dans le mois (1-31)", "1")
+            # Chaque mois: numéro du jour dans le mois + l'heure.
+            j = self.ask(_("Numéro du jour dans le mois (1-31)"), "1")
             try:
                 daynum = int(j)
             except ValueError:
                 daynum = 0
             if not 1 <= daynum <= 31:
-                print("Choix invalide (1-31)"); self.pause(); return
+                print(_("Choix invalide (1-31)")); self.pause(); return
             hour = self._ask_hour()
             schedule = f"*-*-{daynum} {hour:02d}:00:00"
 
         # -- 3e choix: nombre de snapshots à conserver ----------------------
-        keep = self.ask("Nombre d'instantanés à conserver", "7")
+        keep = self.ask(_("Nombre d'instantanés à conserver"), "7")
         try:
             keep = max(0, int(keep))
         except ValueError:
-            print("Nombre invalide"); self.pause(); return
+            print(_("Nombre invalide")); self.pause(); return
 
-        tag = self.ask("Nom du plan (ex. daily, weekly)", freq)
+        tag = self.ask(_("Nom du plan (ex. daily, weekly)"), freq)
 
         if boot:
-            plan_desc = (f"Au démarrage de la machine "
-                         f"({boot_delay} min après le boot)")
+            plan_desc = _f("Au démarrage de la machine ({delay} min après le boot)",
+                           delay=boot_delay)
         else:
             plan_desc = f"OnCalendar={schedule}"
         self.confirm(
-            f"Créer un timer systemd '{tag}'\n"
-            f"  Planning : {plan_desc}\n"
-            f"  Rétention: {keep} instantané(s)\n"
-            f"  Cible    : {self.root}/{self.snapdir}")
+            _f("Créer un timer systemd '{tag}'\n"
+               "  Planning : {plan}\n"
+               "  Rétention: {keep} instantané(s)\n"
+               "  Cible    : {root}/{snapdir}",
+               tag=tag, plan=plan_desc, keep=keep,
+               root=self.root, snapdir=self.snapdir))
         write_timer_files(self.root, self.snapdir, tag, schedule, keep,
                           boot=boot, boot_delay=boot_delay)
         self.pause()
@@ -1860,17 +2056,17 @@ class TUI:
     def do_remove_timer(self):
         timers = list_timers()
         if not timers:
-            print("Aucun timer btrfsmgr actif."); self.pause(); return
+            print(_("Aucun timer btrfsmgr actif.")); self.pause(); return
         items = [f"{t['timer']}  (next={t['next']})" for t in timers]
-        self.render(f" Supprimer une automatisation — {self.root}", items,
-                    "Choisir le timer à supprimer")
-        choice = self.ask("Numéro du timer à supprimer", "")
+        self.render(_f(" Supprimer une automatisation — {root}", root=self.root),
+                    items, _("Choisir le timer à supprimer"))
+        choice = self.ask(_("Numéro du timer à supprimer"), "")
         try:
             idx = int(choice) - 1
         except ValueError:
-            print("Choix invalide"); self.pause(); return
+            print(_("Choix invalide")); self.pause(); return
         if not 0 <= idx < len(timers):
-            print("Choix invalide"); self.pause(); return
+            print(_("Choix invalide")); self.pause(); return
         timer = timers[idx]["timer"]
         # Extract tag from unit name: prefix = btrfsmgr-snap-{root}-{snapdir}-
         import re
@@ -1879,43 +2075,47 @@ class TUI:
             return s.strip("-")
         prefix = f"{APP}-snap-{safe(self.root) or 'root'}-{safe(self.snapdir) or 'snap'}-"
         tag = timer.removeprefix(prefix).removesuffix(".timer")
-        self.confirm(f"Supprimer l'automatisation '{tag}' ?")
+        self.confirm(_f("Supprimer l'automatisation '{tag}' ?", tag=tag))
         delete_timer_files(self.root, self.snapdir, tag)
         self.pause()
 
     def do_restore(self):
         snaps = list_snapshots(self.root, self.snapdir)
         if not snaps:
-            print("Aucun snapshot à restaurer."); self.pause(); return
+            print(_("Aucun snapshot à restaurer.")); self.pause(); return
         items = [f"{s['path']}  (gen {s['gen']})"
                  for s in reversed(snaps)]
-        self.render(f" Restaurer — {self.root}/{self.snapdir}", items,
-                    "Choisir un snapshot à restaurer")
-        choice = self.ask("Numéro du snapshot à restaurer", "1")
+        self.render(_f(" Restaurer — {root}/{snapdir}",
+                       root=self.root, snapdir=self.snapdir), items,
+                    _("Choisir un snapshot à restaurer"))
+        choice = self.ask(_("Numéro du snapshot à restaurer"), "1")
         snaps_r = list(reversed(snaps))
         try:
             idx = int(choice) - 1
         except ValueError:
-            print("Choix invalide"); self.pause(); return
+            print(_("Choix invalide")); self.pause(); return
         if not 0 <= idx < len(snaps_r):
-            print("Choix invalide"); self.pause(); return
+            print(_("Choix invalide")); self.pause(); return
         snap = snaps_r[idx]
         # MÊME ancre que restore_snapshot: le SOUS-VOLUME DE BOOT
         # PRINCIPAL (typ. @), pas le sous-volume monté sur / (qui peut
         # être un snapshot quand on a booté dessus via systemd-boot).
-        at = boot_subvol(self.root) or "(racine du FS)"
+        at = boot_subvol(self.root) or _("(racine du FS)")
         self.confirm(
-            f"Restaurer {snap['path']} en premier plan par deux mv (CoW) ?\n\n"
-            f"  1. mv  {at} → {self.snapdir}/{at}_old-<date-heure>  (conserve l'actuel)\n"
-            f"  2. mv  {self.snapdir}/{snap['path']} → {at}  (le snapshot devient le volume de boot)\n\n"
-            f"Le sous-volume courant n'est pas perdu: il reste dans "
-            f"{self.snapdir}/.\n"
-            f"Redémarrez ensuite pour booter sur la version restaurée.")
+            _f("Restaurer {snap} en premier plan par deux mv (CoW) ?\n\n"
+               "  1. mv  {at} → {snapdir}/{at}_old-<date-heure>  "
+               "(conserve l'actuel)\n"
+               "  2. mv  {snapdir}/{snap} → {at}  "
+               "(le snapshot devient le volume de boot)\n\n"
+               "Le sous-volume courant n'est pas perdu: il reste dans "
+               "{snapdir}/.\n"
+               "Redémarrez ensuite pour booter sur la version restaurée.",
+               snap=snap['path'], at=at, snapdir=self.snapdir))
         restore_snapshot(self.root, self.snapdir, snap["path"])
         self.sync_boot()
         # Option de redémarrage immédiate pour booter sur la version restaurée
-        if self.ask_yn("\nRedémarrer maintenant pour booter sur la version "
-                       "restaurée ?"):
+        if self.ask_yn(_("\nRedémarrer maintenant pour booter sur la version "
+                         "restaurée ?")):
             run(["systemctl", "reboot"], check=False)
             # systemctl reboot prend le relais ; on termine proprement
             try:
@@ -1927,31 +2127,33 @@ class TUI:
     def do_delete(self):
         snaps = list_snapshots(self.root, self.snapdir)
         if not snaps:
-            print("Aucun snapshot à supprimer."); self.pause(); return
+            print(_("Aucun snapshot à supprimer.")); self.pause(); return
         snaps_r = list(reversed(snaps))
         items = [f"{s['path']}  (gen {s['gen']})"
                  for s in snaps_r]
-        self.render(f" Supprimer — {self.root}/{self.snapdir}", items,
-                    "un numéro, plusieurs (ex. 1,3,5), ou 'tous'")
-        choice = self.ask("Numéro(s) du/des snapshot(s) à supprimer "
-                          "(ex. 3, ou 1,2,4, ou 'tous')", "")
+        self.render(_f(" Supprimer — {root}/{snapdir}",
+                       root=self.root, snapdir=self.snapdir), items,
+                    _("un numéro, plusieurs (ex. 1,3,5), ou 'tous'"))
+        choice = self.ask(_("Numéro(s) du/des snapshot(s) à supprimer "
+                            "(ex. 3, ou 1,2,4, ou 'tous')"), "")
         sel = self.parse_selections(choice, len(snaps_r))
         if not sel:
-            print("Aucune sélection valide."); self.pause(); return
+            print(_("Aucune sélection valide.")); self.pause(); return
         targets = [snaps_r[i] for i in sel]
         for t in targets:
             print(f"  → {t['full']}")
-        self.confirm(f"Supprimer DÉFINITIVEMENT {len(targets)} "
-                     f"instantané(s) ?")
+        self.confirm(_f("Supprimer DÉFINITIVEMENT {n} instantané(s) ?",
+                        n=len(targets)))
         ok = 0
         for t in targets:
             rc, out = delete_subvol(t["full"])
             if rc == 0:
                 ok += 1
-                print(f"  Supprimé: {t['full']}")
+                print(_f("  Supprimé: {full}", full=t['full']))
             else:
-                print(f"  Échec: {t['full']} — {out.strip()}")
-        print(f"{ok}/{len(targets)} supprimé(s).")
+                print(_f("  Échec: {full} — {err}", full=t['full'],
+                         err=out.strip()))
+        print(_f("{ok}/{n} supprimé(s).", ok=ok, n=len(targets)))
         self.sync_boot()
         self.pause()
 
@@ -1985,41 +2187,43 @@ class TUI:
         au démarrage.  0 = le menu ne s'affiche pas (boot direct sur la
         première entrée).  Sur Solus (systemd-boot + clr-boot-manager).
         """
-        print("Menu systemd-boot au démarrage")
-        print("  clr-boot-manager set-timeout <secondes>")
-        print("    N > 0 : le menu est affiché pendant N secondes")
-        print("    0     : le menu est masqué (boot direct)")
-        secs = self.ask("Nombre de secondes d'affichage (0 = masquer le menu)", "5")
+        print(_("Menu systemd-boot au démarrage"))
+        print(_("  clr-boot-manager set-timeout <secondes>"))
+        print(_("    N > 0 : le menu est affiché pendant N secondes"))
+        print(_("    0     : le menu est masqué (boot direct)"))
+        secs = self.ask(_("Nombre de secondes d'affichage (0 = masquer le menu)"), "5")
         try:
             secs = int(secs)
         except ValueError:
-            print("Nombre invalide"); self.pause(); return
+            print(_("Nombre invalide")); self.pause(); return
         if secs < 0:
-            print("Nombre invalide (0 ou plus)"); self.pause(); return
-        self.confirm(f"Appliquer: clr-boot-manager set-timeout {secs}")
+            print(_("Nombre invalide (0 ou plus)")); self.pause(); return
+        self.confirm(_f("Appliquer: clr-boot-manager set-timeout {secs}",
+                        secs=secs))
         rc, out = run(["clr-boot-manager", "set-timeout", str(secs)], check=False)
         if rc == 0:
-            print(f"  ✓ Done (timeout={secs}s).")
+            print(_f("  ✓ Done (timeout={secs}s).", secs=secs))
         else:
-            print(f"  ✗ Échec: {out.strip()}")
+            print(_f("  ✗ Échec: {err}", err=out.strip()))
         self.pause()
 
     def do_retention(self):
-        keep = self.ask("Conserver les N plus récents snapshots (0=tous)", "7")
+        keep = self.ask(_("Conserver les N plus récents snapshots (0=tous)"), "7")
         try:
             keep = max(0, int(keep))
         except ValueError:
-            print("Nombre invalide"); self.pause(); return
+            print(_("Nombre invalide")); self.pause(); return
         snaps = list_snapshots(self.root, self.snapdir)
         to_del = snaps[:-keep] if len(snaps) > keep else []
         if not to_del:
-            print("Aucun snapshot à supprimer (déjà ≤", keep, ").")
+            print(_("Aucun snapshot à supprimer (déjà ≤ N)."))
             self.pause()
             return
-        self.render(f" Rétention — conserver {keep}, supprimer {len(to_del)}",
+        self.render(_f(" Rétention — conserver {keep}, supprimer {n}",
+                       keep=keep, n=len(to_del)),
                     [s['path'] for s in to_del],
-                    "Les snapshots listés seront SUPPRIMÉS.")
-        self.confirm("Confirmer la suppression ?")
+                    _("Les snapshots listés seront SUPPRIMÉS."))
+        self.confirm(_("Confirmer la suppression ?"))
         prune_snapshots(self.root, self.snapdir, keep)
         self.pause()
 
@@ -2029,26 +2233,26 @@ class TUI:
         timers = list_timers()
         snaps = list_snapshots(self.root, self.snapdir)
         items = [
-            f"Version              : {APP} {VERSION}",
-            f"Chargeur de boot      : {bl}",
-            f"Subvolume par défaut  : {dv['full'] or '?'}",
-            f"Snapshots existants   : {len(snaps)}",
-            f"Timers {APP} actifs  : {len(timers)}",
+            _f("Version              : {app} {ver}", app=APP, ver=VERSION),
+            _f("Chargeur de boot      : {bl}", bl=bl),
+            _f("Subvolume par défaut  : {dv}", dv=dv['full'] or '?'),
+            _f("Snapshots existants   : {n}", n=len(snaps)),
+            _f("Timers {app} actifs  : {n}", app=APP, n=len(timers)),
         ]
         for t in timers:
             items.append(f"  timer: {t['timer']}  next={t['next']}")
         fs_rc, fs_out = run(["df", "-h", self.root], check=False)
-        items.append("Espace disque:")
+        items.append(_("Espace disque:"))
         items.extend("  " + ln for ln in fs_out.splitlines())
-        self.render(" Infos système", items)
+        self.render(_(" Infos système"), items)
         self.pause()
 
     def run(self):
         if not is_root():
-            print("ERREUR: exécuter en root:  sudo btrfsmgr")
+            print(_("ERREUR: exécuter en root:  sudo btrfsmgr"))
             sys.exit(1)
         if not btrfs_available():
-            print("ERREUR: 'btrfs' introuvable. Installez btrfs-progs.")
+            print(_("ERREUR: 'btrfs' introuvable. Installez btrfs-progs."))
             sys.exit(1)
         # Montage on-demand du sous-volume snapshots + migrations
         # (RO→RW, retrait de l'ancienne ligne fstab).  Le dossier n'est
@@ -2056,15 +2260,15 @@ class TUI:
         try:
             ensure_snapdir(self.root, self.snapdir)
         except Exception as e:
-            print(f"Warning: ensure_snapdir ignorée: {e}")
+            print(_f("Warning: ensure_snapdir ignorée: {err}", err=e))
         while True:
             try:
                 ch = self.main_menu()
             except (KeyboardInterrupt, EOFError):
-                print("\nAu revoir.")
+                print(_("\nAu revoir."))
                 break
             if ch in ("0", "10", "q", "Q"):
-                print("Au revoir.")
+                print(_("Au revoir."))
                 break
             if ch in ("1", "s"):
                 self.do_create()
@@ -2085,7 +2289,7 @@ class TUI:
             elif ch in ("9", "m", "M"):
                 self.do_boot_menu()
             else:
-                print("Choix invalide.")
+                print(_("Choix invalide."))
                 self.pause()
 
 
