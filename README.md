@@ -1,3 +1,7 @@
+# Modification du dépôt
+Le dépôt est à présent https://depoa.julien68.fr/Linuxon/btrfsmgr
+
+La mise à jour de BTRFSMGR modifira le dépôt automatiquement via le script.
 # btrfsmgr — Gestionnaire TUI BTRFS
 
 > ## ⚠️ Avertissement / Disclaimer
