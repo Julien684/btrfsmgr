@@ -54,7 +54,7 @@ sudo ./install.sh
 ```sh
 sudo btrfsmgr uninstall
 ```
-# 3. Utilisation
+# Utilisation
 ```sh
 sudo btrfsmgr                 # gère le sous-volume /
 sudo btrfsmgr /mnt/backup     # gère un autre sous-volume BTRFS
@@ -76,7 +76,7 @@ la version locale est constante `VERSION` dans `btrfsmgr.py`.
 dernière version sur GitHub :
 
 ```sh
-btrfsmgr update
+sudo btrfsmgr update
 ```
 
 * interroge les tags du dépôt GitHub (API GitHub, sinon `git ls-remote`) ;
