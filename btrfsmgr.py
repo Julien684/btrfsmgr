@@ -28,6 +28,10 @@ Raccourcis:
   q      Quitter
 
 Dépendances: python3 (>=3.8), btrfs-progs, systemd (pour les timers et boot)
+
+Navigation du menu: clavier (flèches ↑/↓, j/k, Entrée, Échap, chiffres,
+touches mnémotechniques) et/ou souris (clic gauche).  Hors terminal
+(script/pipeline), retombe sur le choix numéroté.
 """
 
 from __future__ import annotations
@@ -62,7 +66,7 @@ APP = "btrfsmgr"
 # ---------------------------------------------------------------------------
 # Version / mise à jour
 # ---------------------------------------------------------------------------
-VERSION = "1.0.6"          # version locale du logiciel (comparée aux tags Gitea)
+VERSION = "1.0.12"         # version locale du logiciel (comparée aux tags Gitea)
 PROJECT_REPO = "Linuxon/btrfsmgr"
 PROJECT_REPO_URL = "https://depoa.julien68.fr/Linuxon/btrfsmgr.git"
 PROJECT_API = "https://depoa.julien68.fr/api/v1/repos/Linuxon/btrfsmgr"
@@ -239,6 +243,19 @@ _EN = {
     "sous-dossier.  Utilisation de / (racine système).":
         "NOTE: root /snapshots detected — restore impossible on a subfolder.  "
         "Using / (system root).",
+
+    # --- navigation souris/clavier -----------------------------------------
+    "Annulé.": "Cancelled.",
+    "↑/↓ naviguer · Entrée ou clic souris choisir · Échap quitter":
+        "↑/↓ to move · Enter or mouse click to choose · Esc to quit",
+    "↑/↓ naviguer · Entrée ou clic souris choisir · Échap annuler":
+        "↑/↓ to move · Enter or mouse click to choose · Esc to cancel",
+    "Espace cocher · ↑/↓ naviguer · Entrée supprimer · Échap retour":
+        "Space to check · ↑/↓ to move · Enter to delete · Esc to go back",
+    " Confirmer la suppression — {n} instantané(s)":
+        " Confirm deletion — {n} snapshot(s)",
+    "Ces instantanés seront SUPPRIMÉS définitivement.":
+        "These snapshots will be PERMANENTLY DELETED.",
 }
 
 
@@ -1815,13 +1832,52 @@ def sync_bootloader_entries(root: str, snapdir: str,
 # TUI
 # ---------------------------------------------------------------------------
 
+class _ScreenWriter:
+    """Fichier-like: redirige `sys.stdout` (donc `print`) vers l'écran curses
+    du TUI pendant toute la session, pour rester DANS l'interface."""
+
+    def __init__(self, tui: "TUI"):
+        self._tui = tui
+
+    def write(self, s):
+        try:
+            self._tui._screen_write(s)
+        except Exception:
+            pass
+        return len(s)
+
+    def flush(self):
+        pass
+
+    def isatty(self):
+        return False
+
+
 class TUI:
-    """A very small curses-free line TUI (no ncurses dependency)."""
+    """TUI interactive.  Une seule session curses pour tout le programme
+    (menus navigables au clavier ET à la souris) ; repli ANSI/console quand
+    la sortie standard n'est pas un terminal."""
 
     def __init__(self, root: str, snapdir: str = DEFAULT_SNAPDIR):
         self.root = self._validate_root(root)
         self.snapdir = snapdir
         self._refreshed = False
+        # État de l'écran (utilisé en mode curses ; None = repli console).
+        self._std = None
+        self._log: list = []        # lignes de sortie texte (print redirigé)
+        self._wbuf = ""             # tampon de la sortie non terminée
+        self._title = None
+        self._items = None          # entrées du menu courant (None = vue texte)
+        self._footer = ""
+        self._sel = 0
+        self._start = 0
+        self._numbered = True
+        self._prompt = None
+        self._input = ""
+        self._multi = False         # sélection multiple (cases à cocher)
+        self._chosen: set = set()   # index cochés en mode multi
+        self._body_top = 2          # 1re ligne du corps (sous entête/nav/invite)
+        self._cp_orange = 0         # n° de paire de couleurs "orange" (0 = défaut)
 
     @staticmethod
     def _validate_root(raw_root: str) -> str:
@@ -1845,30 +1901,188 @@ class TUI:
         return "/"
 
     # -- rendering ---------------------------------------------------------
+    # -- sortie texte -> écran curses --------------------------------------
+    def _screen_write(self, s: str):
+        """Écrire du texte (print) en mode curses: on accumule des lignes
+        dans un journal affiché à l'écran. Hors curses: sortie directe."""
+        if self._std is None:
+            out = sys.__stdout__
+            try:
+                if out is not None:
+                    out.write(s)
+            except Exception:
+                pass
+            return
+        import re as _re
+        s = _re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", s)   # retirer les codes ANSI
+        self._wbuf += s
+        changed = False
+        while "\n" in self._wbuf:
+            line, self._wbuf = self._wbuf.split("\n", 1)
+            self._log.append(line)
+            changed = True
+        if changed:
+            if len(self._log) > 2000:
+                self._log = self._log[-2000:]
+            self._items = None       # bascule en vue texte
+            self._prompt = None
+            self._redraw()
+
+    def _vmax(self) -> int:
+        if self._std is None:
+            return 10
+        try:
+            maxy, _ = self._std.getmaxyx()
+        except Exception:
+            return 10
+        return max(1, maxy - getattr(self, "_body_top", 2))
+
+    def _redraw(self):
+        """Dessiner tout l'écran curses.
+
+        Disposition (informations en HAUT):
+          ligne 0 : titre
+          ligne 1 : séparateur
+          ensuite : infos de navigation (pied) puis invite/question, puis le
+                    corps (menu ou journal texte) — qui occupe toute la place
+                    restante jusqu'en bas.
+        """
+        std = self._std
+        if std is None:
+            return
+        import curses
+        try:
+            std.erase()
+            maxy, maxx = std.getmaxyx()
+            header = self._title or f"{APP} {VERSION}"
+            try:
+                std.addnstr(0, 0, header[:maxx - 1], curses.A_BOLD)
+                std.addnstr(1, 0, "─" * min(59, maxx - 1), curses.A_DIM)
+            except curses.error:
+                pass
+            y = 2
+            # Texte de navigation / question en ORANGE (plus visible).
+            try:
+                orange = curses.color_pair(self._cp_orange) | curses.A_BOLD
+            except Exception:
+                orange = curses.A_BOLD
+            info = False
+            # Infos de navigation en HAUT (juste sous le titre).
+            if self._footer:
+                try:
+                    std.addnstr(y, 0, self._footer[:maxx - 1], maxx - 1, orange)
+                except curses.error:
+                    pass
+                y += 1
+                info = True
+            # Invite / question en HAUT (sous les infos de navigation).
+            if self._prompt is not None:
+                pline = f"{self._prompt} {self._input}"
+                try:
+                    std.addnstr(y, 0, pline[:maxx - 1], maxx - 1, orange)
+                    std.move(y, min(len(self._prompt) + 1 + len(self._input),
+                                    maxx - 2))
+                except curses.error:
+                    pass
+                y += 1
+                info = True
+            if info:
+                y += 1                      # ligne vide de séparation
+            self._body_top = y
+            vmax = max(1, maxy - y)
+            if self._items is not None:
+                if self._sel < self._start:
+                    self._start = self._sel
+                elif self._sel >= self._start + vmax:
+                    self._start = self._sel - vmax + 1
+                for i in range(self._start,
+                               min(len(self._items), self._start + vmax)):
+                    tag = (" %-2d " % (i + 1)) if self._numbered else "    "
+                    chk = ""
+                    if self._multi:
+                        chk = "[x] " if i in self._chosen else "[ ] "
+                    line = (tag + chk + str(self._items[i]))[:maxx - 3]
+                    attr = curses.A_REVERSE if i == self._sel else curses.A_NORMAL
+                    try:
+                        std.addnstr(y + (i - self._start), 1, line,
+                                    maxx - 2, attr)
+                    except curses.error:
+                        pass
+            else:
+                vis = self._log[-vmax:]
+                for j, line in enumerate(vis):
+                    try:
+                        std.addnstr(y + j, 0, str(line)[:maxx - 1],
+                                    curses.A_NORMAL)
+                    except curses.error:
+                        pass
+            std.refresh()
+        except Exception:
+            pass
+
+    # -- rendering ---------------------------------------------------------
     def render(self, title: str, items: list[str], footer: str = ""):
-        sys.stdout.write("\033[2J\033[H")          # clear screen
-        sys.stdout.write(f"\033[1;36m{title}\033[0m\n")
-        sys.stdout.write("\033[2;33m" + "─" * 60 + "\033[0m\n")
-        for i, it in enumerate(items, 1):
-            sys.stdout.write(f"  \033[1;32m{i}\033[0m  {it}\n")
-        if footer:
+        if self._std is None:
+            sys.stdout.write("\033[2J\033[H")          # clear screen
+            sys.stdout.write(f"\033[1;36m{title}\033[0m\n")
             sys.stdout.write("\033[2;33m" + "─" * 60 + "\033[0m\n")
-            sys.stdout.write(f"\033[2m{footer}\033[0m\n")
-        sys.stdout.flush()
+            for i, it in enumerate(items, 1):
+                sys.stdout.write(f"  \033[1;32m{i}\033[0m  {it}\n")
+            if footer:
+                sys.stdout.write("\033[2;33m" + "─" * 60 + "\033[0m\n")
+                sys.stdout.write(f"\033[2m{footer}\033[0m\n")
+            sys.stdout.flush()
+            return
+        self._title = title
+        self._items = list(items)
+        self._numbered = True
+        self._footer = footer
+        self._sel = 0
+        self._start = 0
+        self._prompt = None
+        self._log = []
+        self._redraw()
 
     def ask(self, prompt: str, default: str = "") -> str:
-        try:
-            val = input(f"{prompt}{'[' + default + ']' if default else ''}: ").strip()
-            return val or default
-        except EOFError:
-            return default
+        if self._std is None:
+            try:
+                val = input(f"{prompt}"
+                            f"{'[' + default + ']' if default else ''}: ").strip()
+                return val or default
+            except EOFError:
+                return default
+        import curses
+        self._prompt = f"{prompt}{'[' + default + ']' if default else ''}:"
+        self._input = ""
+        buf = ""
+        while True:
+            self._input = buf
+            self._redraw()
+            c = self._std.getch()
+            if c == -1:
+                continue
+            if c in (curses.KEY_ENTER, 10, 13):
+                break
+            if c == 27:                      # Échap: garder la valeur par défaut
+                break
+            if c in (curses.KEY_BACKSPACE, 8, 127):
+                buf = buf[:-1]
+            elif 32 <= c < 127:
+                buf += chr(c)
+        self._prompt = None
+        self._input = ""
+        self._redraw()
+        return buf.strip() or default
 
     def ask_yn(self, prompt: str) -> bool:
-        try:
-            val = input(f"{prompt} [o/n]: ").strip().lower()
-        except EOFError:
-            return False
-        return val in ("o", "oui", "y", "yes")
+        if self._std is None:
+            try:
+                val = input(f"{prompt} [o/n]: ").strip().lower()
+            except EOFError:
+                return False
+            return val in ("o", "oui", "y", "yes")
+        ans = self.ask(f"{prompt} [o/n]").strip().lower()
+        return ans in ("o", "oui", "y", "yes")
 
     def confirm(self, prompt: str) -> None:
         if not self.ask_yn(prompt):
@@ -1876,32 +2090,160 @@ class TUI:
             sys.exit(0)
 
     def pause(self):
+        if self._std is None:
+            try:
+                input("\n[Entrée pour continuer…]")
+            except EOFError:
+                pass
+            return
+        self._footer = "[Entrée pour continuer…]"
+        self._redraw()
+        self._std.getch()
+        self._footer = ""
+        self._redraw()
+
+    # -- navigation souris + clavier --------------------------------------
+    def select(self, title: str, items: list[str], footer: str = "",
+               default: int = 0, numbered: bool = True,
+               hotkeys: dict | None = None, multi: bool = False):
+        """Menu sélectionnable à la SOURIS et au CLAVIER (flèches ↑/↓, Entrée,
+        Échap/Retour, chiffres, touches mnémoniques) — style solseek.
+
+        En mode curses (stdin = terminal) on dessine dans l'écran déjà ouvert
+        (aucune sortie/réentrée: on reste dans l'interface). Hors terminal
+        (script/pipeline), repli sur le prompt numéroté classique.
+
+        `multi=True` : cases à cocher ; Espace (ou clic) coche/décoche,
+        Entrée valide → renvoie la liste triée des index cochés.
+
+        Renvoie l'index choisi (int) en mode simple, la liste des index cochés
+        (list[int]) en mode multi, ou None si annulé (Échap/Retour).
+        """
+        hot = {k: v for k, v in (hotkeys or {}).items()}
+        if self._std is None:
+            return self._select_fallback(title, items, footer, default,
+                                         numbered, hot, multi)
+        import curses
+        self._title = title
+        self._items = list(items)
+        self._numbered = numbered
+        self._footer = footer
+        self._sel = default if 0 <= default < len(items) else 0
+        self._start = 0
+        self._prompt = None
+        self._log = []
+        self._multi = multi
+        self._chosen = set()
+        while True:
+            self._redraw()
+            c = self._std.getch()
+            if c == -1:
+                continue
+            if 0 <= c < 256 and chr(c) in hot:
+                self._items = None
+                return hot[chr(c)]
+            if c == curses.KEY_UP or c in (ord('k'), ord('K')):
+                self._sel = (self._sel - 1) % len(items)
+            elif c == curses.KEY_DOWN or c in (ord('j'), ord('J')):
+                self._sel = (self._sel + 1) % len(items)
+            elif c == curses.KEY_HOME:
+                self._sel = 0
+            elif c == curses.KEY_END:
+                self._sel = len(items) - 1
+            elif c == curses.KEY_NPAGE:
+                self._sel = min(len(items) - 1, self._sel + self._vmax())
+            elif c == curses.KEY_PPAGE:
+                self._sel = max(0, self._sel - self._vmax())
+            elif c in (curses.KEY_ENTER, 10, 13):
+                self._items = None
+                return sorted(self._chosen) if multi else self._sel
+            elif c == ord(' '):
+                if multi:
+                    if self._sel in self._chosen:
+                        self._chosen.discard(self._sel)
+                    else:
+                        self._chosen.add(self._sel)
+                    self._sel = min(len(items) - 1, self._sel + 1)
+                else:
+                    self._items = None
+                    return self._sel
+            elif c in (27, curses.KEY_BACKSPACE, 8, 127):
+                self._items = None
+                return None
+            elif c == curses.KEY_MOUSE:
+                try:
+                    _, _mx, _my, _, bstate = curses.getmouse()
+                    row = _my - self._body_top + self._start
+                    if 0 <= row < len(items):
+                        self._sel = row
+                        if bstate & (curses.BUTTON1_CLICKED
+                                     | curses.BUTTON1_PRESSED
+                                     | curses.BUTTON1_DOUBLE_CLICKED):
+                            if multi:
+                                if row in self._chosen:
+                                    self._chosen.discard(row)
+                                else:
+                                    self._chosen.add(row)
+                            else:
+                                self._items = None
+                                return self._sel
+                except Exception:
+                    pass
+            elif c == curses.KEY_RESIZE:
+                continue
+            elif numbered and c in range(ord('1'), ord('9') + 1):
+                n = c - ord('1')
+                if n < len(items):
+                    self._sel = n
+
+    def _select_fallback(self, title: str, items: list[str], footer: str,
+                         default: int, numbered: bool,
+                         hotkeys: dict, multi: bool = False):
+        """Repli non-terminal: affiche le menu et lit un numéro (ou une des
+        touches mnémoniques de `hotkeys`, ou une liste `1,3,5` / `tous` en
+        mode multi), comme avant."""
+        self.render(title, items, footer)
+        ans = self.ask(_("Choix"), "").strip().lower()
+        if multi:
+            return self.parse_selections(ans, len(items))
+        if ans in hotkeys:
+            return hotkeys[ans]
         try:
-            input("\n[Entrée pour continuer…]")
-        except EOFError:
+            i = int(ans) - 1
+            if 0 <= i < len(items):
+                return i
+        except ValueError:
             pass
+        print(_("Choix invalide."))
+        return None
 
     # -- screens ------------------------------------------------------------
     def main_menu(self):
         title = _f(" Unofficial Solus BTRFS Manager v{ver} — {root}",
                    ver=VERSION, root=self.root)
-        self.render(
-            title,
-            [
-                _("Créer un instantané"),
-                _("Lister les instantanés"),
-                _("Restaurer un instantané"),
-                _("Supprimer un instantané"),
-                _("Programmer des instantanés automatiques (systemd)"),
-                _("Supprimer une automatisation (timer systemd)"),
-                _("Rétention : conserver les N plus récents"),
-                _("Infos système (chargeur de boot, timers…)"),
-                _("Menu systemd-boot : afficher/masquer au démarrage"),
-                _("Quitter"),
-            ],
-            _("0-10 ou lettre · 10/q quitter"),
-        )
-        return self.ask(_("Choix"), "1")
+        items = [
+            _("Créer un instantané"),
+            _("Lister les instantanés"),
+            _("Restaurer un instantané"),
+            _("Supprimer un instantané"),
+            _("Programmer des instantanés automatiques (systemd)"),
+            _("Supprimer une automatisation (timer systemd)"),
+            _("Rétention : conserver les N plus récents"),
+            _("Infos système (chargeur de boot, timers…)"),
+            _("Menu systemd-boot : afficher/masquer au démarrage"),
+            _("Quitter"),
+        ]
+        # Index -> jeton d'aiguillage (même suite que run()) / lettres >= index.
+        keys = ["s", "l", "r", "d", "p", "x", "7", "i", "m", "q"]
+        hot = {"s": 0, "l": 1, "r": 2, "d": 3, "a": 3, "p": 4,
+               "x": 5, "i": 7, "m": 8, "q": 9}
+        idx = self.select(title, items,
+                          footer=_("↑/↓ naviguer · Entrée ou clic souris "
+                                   "choisir · Échap quitter"),
+                          default=0, hotkeys=hot)
+        if not isinstance(idx, int):
+            return "q"
+        return keys[idx]
 
     def sync_boot(self):
         """Synchronise les entrées systemd-boot avec les snapshots présents."""
@@ -1960,16 +2302,16 @@ class TUI:
 
     def do_schedule(self):
         # -- 1er choix: fréquence -------------------------------------------
-        self.render(
+        freqs = [_("Chaque jour"), _("Chaque semaine"), _("Chaque mois")]
+        freq_idx = self.select(
             _(" Programmer des instantanés automatiques — fréquence"),
-            [_("Chaque jour"), _("Chaque semaine"), _("Chaque mois")],
-            _("Choisir la fréquence"),
-        )
-        freq = self.ask(_("Fréquence"), "1")
-        freq_map = {"1": "daily", "2": "weekly", "3": "monthly"}
-        if freq not in freq_map:
-            print(_("Choix invalide")); self.pause(); return
-        freq = freq_map[freq]
+            freqs,
+            footer=_("↑/↓ naviguer · Entrée ou clic souris choisir · "
+                     "Échap annuler"),
+            default=0)
+        if not isinstance(freq_idx, int):
+            print(_("Annulé.")); self.pause(); return
+        freq = ["daily", "weekly", "monthly"][freq_idx]
 
         # -- 2e choix: détail selon la fréquence ---------------------------
         boot = False
@@ -1977,13 +2319,15 @@ class TUI:
         schedule = ""
         if freq == "daily":
             # Chaque jour: heure précise OU au démarrage.
-            self.render(
+            when_idx = self.select(
                 _(" Chaque jour"),
                 [_("À une heure précise"), _("Au démarrage de la machine")],
-                _("Choisir le moment"),
-            )
-            when = self.ask(_("Quand"), "1")
-            if when == "2":
+                footer=_("↑/↓ naviguer · Entrée ou clic souris choisir · "
+                         "Échap annuler"),
+                default=0)
+            if not isinstance(when_idx, int):
+                print(_("Annulé.")); self.pause(); return
+            if when_idx == 1:
                 boot = True
                 hour = None
                 # Délai souhaité après le démarrage (en minutes).
@@ -1995,25 +2339,20 @@ class TUI:
                         break
                     except ValueError:
                         print(_("Nombre invalide"))
-            elif when == "1":
-                hour = self._ask_hour()
             else:
-                print(_("Choix invalide")); self.pause(); return
+                hour = self._ask_hour()
             schedule = f"*-*-* {hour:02d}:00:00" if not boot else ""
         elif freq == "weekly":
             # Chaque semaine: demander le jour de la semaine + l'heure.
             days = [_("lundi"), _("mardi"), _("mercredi"), _("jeudi"),
                     _("vendredi"), _("samedi"), _("dimanche")]
-            self.render(_(" Chaque semaine — jour"), days,
-                        _("Choisir le jour"))
-            d = self.ask(_("Jour de la semaine"), "1")
-            try:
-                idx = int(d) - 1
-            except ValueError:
-                idx = -1
-            if not 0 <= idx < 7:
-                print(_("Choix invalide")); self.pause(); return
-            day_abbr = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][idx]
+            day_idx = self.select(_(" Chaque semaine — jour"), days,
+                                  footer=_("↑/↓ naviguer · Entrée ou clic "
+                                           "souris choisir · Échap annuler"),
+                                  default=0)
+            if not isinstance(day_idx, int):
+                print(_("Annulé.")); self.pause(); return
+            day_abbr = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][day_idx]
             hour = self._ask_hour()
             schedule = f"{day_abbr} *-*-* {hour:02d}:00:00"
         elif freq == "monthly":
@@ -2058,15 +2397,14 @@ class TUI:
         if not timers:
             print(_("Aucun timer btrfsmgr actif.")); self.pause(); return
         items = [f"{t['timer']}  (next={t['next']})" for t in timers]
-        self.render(_f(" Supprimer une automatisation — {root}", root=self.root),
-                    items, _("Choisir le timer à supprimer"))
-        choice = self.ask(_("Numéro du timer à supprimer"), "")
-        try:
-            idx = int(choice) - 1
-        except ValueError:
-            print(_("Choix invalide")); self.pause(); return
-        if not 0 <= idx < len(timers):
-            print(_("Choix invalide")); self.pause(); return
+        idx = self.select(_f(" Supprimer une automatisation — {root}",
+                             root=self.root),
+                          items,
+                          footer=_("↑/↓ naviguer · Entrée ou clic souris "
+                                   "choisir · Échap annuler"),
+                          default=0)
+        if not isinstance(idx, int):
+            print(_("Annulé.")); self.pause(); return
         timer = timers[idx]["timer"]
         # Extract tag from unit name: prefix = btrfsmgr-snap-{root}-{snapdir}-
         import re
@@ -2085,17 +2423,15 @@ class TUI:
             print(_("Aucun snapshot à restaurer.")); self.pause(); return
         items = [f"{s['path']}  (gen {s['gen']})"
                  for s in reversed(snaps)]
-        self.render(_f(" Restaurer — {root}/{snapdir}",
-                       root=self.root, snapdir=self.snapdir), items,
-                    _("Choisir un snapshot à restaurer"))
-        choice = self.ask(_("Numéro du snapshot à restaurer"), "1")
         snaps_r = list(reversed(snaps))
-        try:
-            idx = int(choice) - 1
-        except ValueError:
-            print(_("Choix invalide")); self.pause(); return
-        if not 0 <= idx < len(snaps_r):
-            print(_("Choix invalide")); self.pause(); return
+        idx = self.select(_f(" Restaurer — {root}/{snapdir}",
+                             root=self.root, snapdir=self.snapdir),
+                          items,
+                          footer=_("↑/↓ naviguer · Entrée ou clic souris "
+                                   "choisir · Échap annuler"),
+                          default=0)
+        if not isinstance(idx, int):
+            print(_("Annulé.")); self.pause(); return
         snap = snaps_r[idx]
         # MÊME ancre que restore_snapshot: le SOUS-VOLUME DE BOOT
         # PRINCIPAL (typ. @), pas le sous-volume monté sur / (qui peut
@@ -2131,19 +2467,28 @@ class TUI:
         snaps_r = list(reversed(snaps))
         items = [f"{s['path']}  (gen {s['gen']})"
                  for s in snaps_r]
-        self.render(_f(" Supprimer — {root}/{snapdir}",
-                       root=self.root, snapdir=self.snapdir), items,
-                    _("un numéro, plusieurs (ex. 1,3,5), ou 'tous'"))
-        choice = self.ask(_("Numéro(s) du/des snapshot(s) à supprimer "
-                            "(ex. 3, ou 1,2,4, ou 'tous')"), "")
-        sel = self.parse_selections(choice, len(snaps_r))
-        if not sel:
+        sel = self.select(
+            _f(" Supprimer — {root}/{snapdir}",
+               root=self.root, snapdir=self.snapdir),
+            items,
+            footer=_("Espace cocher · ↑/↓ naviguer · Entrée supprimer · "
+                     "Échap retour"),
+            default=0, multi=True)
+        if sel is None:                 # Échap: retour au menu principal
+            return
+        if not isinstance(sel, list) or not sel:
             print(_("Aucune sélection valide.")); self.pause(); return
         targets = [snaps_r[i] for i in sel]
-        for t in targets:
-            print(f"  → {t['full']}")
-        self.confirm(_f("Supprimer DÉFINITIVEMENT {n} instantané(s) ?",
-                        n=len(targets)))
+        # Récapitulatif des instantanés visés + confirmation.
+        # Répondre NON annule la suppression (retour au menu), ne quitte pas.
+        recap = [f"{t['path']}   (gen {t['gen']})" for t in targets]
+        self.render(
+            _f(" Confirmer la suppression — {n} instantané(s)",
+               n=len(targets)),
+            recap,
+            _("Ces instantanés seront SUPPRIMÉS définitivement."))
+        if not self.ask_yn(_("Confirmer la suppression ?")):
+            print(_("Annulé.")); self.pause(); return
         ok = 0
         for t in targets:
             rc, out = delete_subvol(t["full"])
@@ -2261,6 +2606,58 @@ class TUI:
             ensure_snapdir(self.root, self.snapdir)
         except Exception as e:
             print(_f("Warning: ensure_snapdir ignorée: {err}", err=e))
+        # UNE SEULE session curses pour tout le programme: on ne ressort plus
+        # en console entre les écrans.  Repli console si pas de terminal ou
+        # si curses est indisponible.
+        if sys.stdin.isatty():
+            try:
+                import curses
+                curses.wrapper(self._curses_loop)
+                return
+            except SystemExit:
+                raise
+            except Exception:
+                pass
+        self._loop()
+
+    def _curses_loop(self, std):
+        """Initialiser curses UNE fois, rediriger stdout vers l'écran, puis
+        dérouler la boucle interactive."""
+        import curses
+        self._std = std
+        try:
+            curses.curs_set(0)
+        except Exception:
+            pass
+        try:
+            curses.mousemask(curses.ALL_MOUSE_EVENTS
+                             | curses.REPORT_MOUSE_POSITION)
+        except Exception:
+            pass
+        # Couleur "orange" pour les infos de navigation / questions.
+        # 256 couleurs → orange xterm (208); sinon repli jaune.
+        try:
+            curses.start_color()
+            try:
+                curses.use_default_colors()
+            except Exception:
+                pass
+            self._cp_orange = 1
+            if curses.COLORS >= 256:
+                curses.init_pair(self._cp_orange, 208, -1)
+            else:
+                curses.init_pair(self._cp_orange, curses.COLOR_YELLOW, -1)
+        except Exception:
+            self._cp_orange = 0
+        old_out = sys.stdout
+        sys.stdout = _ScreenWriter(self)
+        try:
+            self._loop()
+        finally:
+            sys.stdout = old_out
+            self._std = None
+
+    def _loop(self):
         while True:
             try:
                 ch = self.main_menu()

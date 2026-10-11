@@ -26,15 +26,15 @@ SRC_DIR = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(".")
 OUT_DIR = Path(sys.argv[2]) if len(sys.argv) > 2 else SRC_DIR
 
 PACKAGE_NAME   = "btrfsmgr"
-VERSION        = "1.0.4"   # must match VERSION in btrfsmgr.py
-RELEASE        = 1
+VERSION        = "1.0.12"   # must match VERSION in btrfsmgr.py
+RELEASE        = 1   # bump on every republish with the same VERSION — eopkg caches by FILENAME, not by content hash; same name = stale cache
 DIST_RELEASE   = 1
 ARCH           = "x86_64"
 DIST_NAME      = "Solus"
 BUILD_HOST     = "solus-local"
-HOME_PAGE      = "https://github.com/Julien684/btrfsmgr"
+HOME_PAGE      = "https://depoa.julien68.fr/Linuxon/btrfsmgr"
 PACKAGER_NAME  = "Julien"
-PACKAGER_EMAIL = "julien@getsol.us"
+PACKAGER_EMAIL = "julien_solus@use.startmail.com"
 PART_OF        = "system.utilities"
 
 # Files to include in the package.
@@ -49,14 +49,25 @@ FILE_LIST = [
     ("usr/share/licenses/btrfsmgr/LICENSE",       "LICENSE",             0o644),
 ]
 
-# Runtime dependencies (package names; release=0 means "any release")
-RUNTIME_DEPS = [
-    "btrfs-progs",
-    "python3",
-    "systemd",
-]
+# No runtime deps in the .eopkg: `eopkg install <url>` downloads a single
+# file and cannot resolve deps against the Solus repo database.
+# Prerequisites (btrfs-progs, python3, systemd) are documented in README.md
+# and verified at runtime by btrfsmgr itself.
+RUNTIME_DEPS = []
 
 OUT_FILENAME = f"{PACKAGE_NAME}-{VERSION}-{RELEASE}-{DIST_RELEASE}-{ARCH}.eopkg"
+
+# Description française (métadonnées XML — accents préservés en UTF-8).
+_FR_SUMMARY = ("Gestionnaire d'instantanés BTRFS en TUI — créer, lister, "
+               "restaurer et automatiser les instantanés de sous-volumes BTRFS")
+_FR_DESCRIPTION = """btrfsmgr est un outil TUI pour gérer les instantanés de sous-volumes BTRFS
+sur Linux. Il permet de créer, lister, restaurer et supprimer des instantanés ;
+de planifier des instantanés automatiques via des timers systemd avec une
+politique de rétention ; et de générer des entrées de démarrage (GRUB /
+systemd-boot) pour booter directement sur un instantané. La restauration est
+un échange CoW (deux renommages) — aucune donnée n'est copiée. Nécessite
+btrfs-progs et Python 3.8+ (bibliothèque standard uniquement, sans dépendance
+tierce). Non officiel ; non affilié à Solus ni au projet BTRFS."""
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -120,7 +131,6 @@ def build():
             info.uid = 0
             info.gid = 0
             info.mtime = 0
-            info.type = tarfile.REGTYPE
             tar.addfile(info, io.BytesIO(data))
     install_tar_xz = tar_buf.getvalue()
     print(f"  install.tar.xz: {len(install_tar_xz)} bytes")
@@ -152,7 +162,7 @@ def build():
     if RUNTIME_DEPS:
         deps_xml = "    <RuntimeDependencies>\n"
         for dep in RUNTIME_DEPS:
-            deps_xml += f'        <Dependency release="0">{dep}</Dependency>\n'
+            deps_xml += f"        <Dependency>{dep}</Dependency>\n"
         deps_xml += "    </RuntimeDependencies>\n"
 
     def a(s: str) -> str:
@@ -177,6 +187,8 @@ boot entries (GRUB / systemd-boot) so you can boot directly into a snapshot.
 Restore is a CoW swap (two renames) - no data is copied.
 Requires btrfs-progs and Python 3.8+ (standard library only, no third-party
 dependencies). Unofficial; not affiliated with Solus or the BTRFS project.""")}</Description>
+        <Summary xml:lang="fr">{_FR_SUMMARY}</Summary>
+        <Description xml:lang="fr">{_FR_DESCRIPTION}</Description>
         <PartOf>{PART_OF}</PartOf>
         <License>GPL-3.0-or-later</License>
 {deps_xml}        <History>
