@@ -26,8 +26,8 @@ SRC_DIR = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(".")
 OUT_DIR = Path(sys.argv[2]) if len(sys.argv) > 2 else SRC_DIR
 
 PACKAGE_NAME   = "btrfsmgr"
-VERSION        = "1.0.12"   # must match VERSION in btrfsmgr.py
-RELEASE        = 1   # bump on every republish with the same VERSION — eopkg caches by FILENAME, not by content hash; same name = stale cache
+VERSION        = "1.0.14"   # must match VERSION in btrfsmgr.py
+RELEASE        = 3   # bump on every republish with the same VERSION — eopkg caches by FILENAME, not by content hash; same name = stale cache
 DIST_RELEASE   = 1
 ARCH           = "x86_64"
 DIST_NAME      = "Solus"

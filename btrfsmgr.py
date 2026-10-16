@@ -66,7 +66,7 @@ APP = "btrfsmgr"
 # ---------------------------------------------------------------------------
 # Version / mise à jour
 # ---------------------------------------------------------------------------
-VERSION = "1.0.12"         # version locale du logiciel (comparée aux tags Gitea)
+VERSION = "1.0.14"         # version locale du logiciel (comparée aux tags Gitea)
 PROJECT_REPO = "Linuxon/btrfsmgr"
 PROJECT_REPO_URL = "https://depoa.julien68.fr/Linuxon/btrfsmgr.git"
 PROJECT_API = "https://depoa.julien68.fr/api/v1/repos/Linuxon/btrfsmgr"
@@ -90,6 +90,20 @@ def _detect_language() -> str:
 
 
 LANGUAGE = _detect_language()
+
+# Avertissement affiché avant de restaurer un instantané dont le noyau diffère
+# de celui du système en cours.  Le noyau de démarrage vit dans la partition
+# EFI (/boot), pas dans l'instantané (qui ne conserve que les modules) : après
+# restauration, la racine restaurée peut ne plus avoir les modules du noyau
+# qui démarrera.  (Constante partagée TUI + GUI, et clé de traduction ci-dessous.)
+KERNEL_MISMATCH_WARNING = (
+    "⚠ Différence de noyau détectée !\n"
+    "  Noyau en cours        : {cur}\n"
+    "  Noyau de l'instantané : {snaps}\n\n"
+    "Le noyau de démarrage vit dans la partition EFI (/boot), pas dans "
+    "l'instantané (qui ne conserve que les modules usr/lib/modules). Après "
+    "restauration, la racine restaurée n'aura pas les modules du noyau {cur} "
+    "qui démarrera : le démarrage peut échouer ou être dégradé.")
 
 # Table de traduction EN (clé = chaîne FR source, valeur = EN).
 _EN = {
@@ -160,6 +174,12 @@ _EN = {
     "Nombre d'instantanés à conserver": "Number of snapshots to keep",
     "Au démarrage de la machine ({delay} min après le boot)":
         "On machine boot ({delay} min after boot)",
+    "Au démarrage de la machine ({delay} min après le boot, un seul par jour)":
+        "On machine boot ({delay} min after boot, one per day)",
+    "N'effectuer qu'un seul instantané par jour "
+    "(ignoré si un instantané du jour existe déjà) ?":
+        "Create only one snapshot per day "
+        "(skipped if a snapshot for today already exists)?",
     "Créer un timer systemd '{tag}'\n  Planning : {plan}\n  Rétention: "
     "{keep} instantané(s)\n  Cible    : {root}/{snapdir}":
         "Create a systemd timer '{tag}'\n  Schedule : {plan}\n  Retention: "
@@ -256,6 +276,32 @@ _EN = {
         " Confirm deletion — {n} snapshot(s)",
     "Ces instantanés seront SUPPRIMÉS définitivement.":
         "These snapshots will be PERMANENTLY DELETED.",
+
+    # --- avertissement noyau + choix d'adapter systemd-boot (TUI + GUI) -----
+    KERNEL_MISMATCH_WARNING:
+        "⚠ Kernel mismatch detected!\n"
+        "  Current kernel        : {cur}\n"
+        "  Snapshot kernel       : {snaps}\n\n"
+        "The boot kernel lives in the EFI partition (/boot), not in the "
+        "snapshot (which only keeps the usr/lib/modules modules). After "
+        "restoring, the restored root will not have the modules of the {cur} "
+        "kernel that will boot: booting may fail or be degraded.",
+    "Adapter les entrées de démarrage systemd-boot ?":
+        "Update the systemd-boot entries?",
+    "Opération : {action}": "Operation: {action}",
+    "• Adapter systemd-boot : mettre le menu de démarrage à jour.":
+        "• Update systemd-boot: bring the boot menu up to date.",
+    "• Ne pas adapter : laisser le menu de démarrage inchangé.":
+        "• Do not update: leave the boot menu unchanged.",
+    "• Annuler : ne rien faire.": "• Cancel: do nothing.",
+    "Annuler": "Cancel",
+    "Ne pas adapter": "Do not update",
+    "Adapter systemd-boot": "Update systemd-boot",
+    "Adapter les entrées systemd-boot": "Update the systemd-boot entries",
+    "Créer l'instantané « {name} »": "Create the snapshot “{name}”",
+    "Restaurer « {name} »": "Restore “{name}”",
+    "Supprimer {n} snapshot(s)": "Delete {n} snapshot(s)",
+    "Rétention : garder {keep}": "Retention: keep {keep}",
 }
 
 
@@ -277,16 +323,19 @@ DEFAULT_SNAPDIR = "snapshots"
 # l'unité systemd pour créer + pruner les snapshots.
 _SNAP_SCRIPT_BODY = r"""#!/usr/bin/env bash
 # btrfsmgr-snap.sh — créer un snapshot BTRFS + prune (conserver les N derniers).
-# Usage: btrfsmgr-snap.sh <root> <snapdir> <name> <keep>
+# Usage: btrfsmgr-snap.sh <root> <snapdir> <name> <keep> [once_per_day]
+# once_per_day=1 → n'effectue (au plus) qu'un instantané par jour: si un
+# instantané daté d'aujourd'hui existe déjà, on ne crée rien.
 set -euo pipefail
 
 ROOT="${1:-}"
 SNAPDIR="${2:-snapshots}"
 NAME="${3:-}"
 KEEP="${4:-7}"
+ONCE_PER_DAY="${5:-0}"
 
 if [[ -z "$ROOT" || -z "$NAME" ]]; then
-    echo "Usage: $0 <root> <snapdir> <name> <keep>" >&2
+    echo "Usage: $0 <root> <snapdir> <name> <keep> [once_per_day]" >&2
     exit 1
 fi
 
@@ -403,6 +452,18 @@ prune_snapshots() {
 
 ensure_snapdir "$ROOT" "$SNAPDIR"
 vis="$ROOT/$SNAPDIR"
+
+# Un seul instantané par jour: si un instantané daté d'aujourd'hui est déjà
+# présent, on s'arrête — le déclenchement au démarrage est alors capé à un
+# instantané par jour (un démarrage supplémentaire le même jour est ignoré).
+if [[ "$ONCE_PER_DAY" == "1" ]]; then
+    _day="$(date +%Y%m%d)"
+    if compgen -G "$vis/*$_day*" >/dev/null 2>&1; then
+        echo "[btrfsmgr-snap] instantané du jour ($_day) déjà présent — ignoré"
+        exit 0
+    fi
+fi
+
 target="$vis/$NAME"
 if [[ -e "$target" ]]; then
     echo "ERREUR: $target existe déjà" >&2
@@ -1277,13 +1338,16 @@ def install_snap_script() -> str:
 
 def write_timer_files(root: str, snapdir: str, tag: str, schedule: str,
                       keep: int, boot: bool = False,
-                      boot_delay: int = 5) -> str:
+                      boot_delay: int = 5, once_per_day: bool = False) -> str:
     """Create service + timer units for automatic snapshots with retention.
 
     `schedule` is an OnCalendar value (e.g. "daily", "weekly", "hourly-*",
     "Mon *-*-* 03:00:00").  `keep` is the number of snapshots to retain.
     Si `boot` est vrai, le timer tourne `boot_delay` minutes après le
-    démarrage (OnBootSec) et `schedule` est ignoré.
+    démarrage (OnBootSec) et `schedule` est ignoré.  Si `once_per_day` est
+    vrai (pertinent seulement en mode `boot`), le script n'effectue pas de
+    nouvel instantané si un instantané du jour existe déjà — au plus un
+    instantané par jour.
     """
     unit_name = _snap_unit_name(root, snapdir, tag)
     svc = f"{unit_name}.service"
@@ -1295,13 +1359,14 @@ def write_timer_files(root: str, snapdir: str, tag: str, schedule: str,
     # PAS comme des spécificateurs: le script reçoit "%Y%m%d-%H%M%S" et
     # l'expand lui-même avec `date` (timestamp de l'exécution).
     script_path = install_snap_script()
+    once_flag = "1" if (boot and once_per_day) else "0"
     svc_content = f"""[Unit]
 Description={APP} — snapshot btrfs de {root} ({tag})
 DefaultDependencies=no
 
 [Service]
 Type=oneshot
-ExecStart={script_path} {root} {snapdir} {tag}-%%Y%%m%%d-%%H%%M%%S {keep}
+ExecStart={script_path} {root} {snapdir} {tag}-%%Y%%m%%d-%%H%%M%%S {keep} {once_flag}
 RemainAfterExit=no
 User=root
 """
@@ -1311,6 +1376,8 @@ User=root
     if boot:
         _trigger = f"OnBootSec={boot_delay}min"
         _plan = f"Au démarrage ({boot_delay} min après le boot)"
+        if once_per_day:
+            _plan += " — un seul instantané par jour"
     else:
         _trigger = f"OnCalendar={schedule}"
         _plan = schedule
@@ -1520,6 +1587,64 @@ def fver_match(fname: str, kver: str) -> bool:
     if m_build and m_build.group(1) not in fname:
         return False
     return True
+
+
+def _kernel_release() -> str:
+    """Version du noyau en cours (équivalent `uname -r`)."""
+    try:
+        return os.uname().release
+    except Exception:
+        return ""
+
+
+def _snapshot_module_dirs(base: str) -> list[str]:
+    """Noms de version de noyau présents dans un instantané monté sous `base`.
+
+    On lit les modules (`usr/lib/modules/<ver>/` puis `lib/modules/<ver>/`).
+    L'instantané ne contient PAS le noyau (il vit dans l'ESP /boot), mais il
+    contient bien les modules du noyau présent au moment de l'instantané.
+    """
+    for sub in ("usr/lib/modules", "lib/modules"):
+        d = os.path.join(base, sub)
+        if os.path.isdir(d):
+            try:
+                return sorted(n for n in os.listdir(d)
+                              if os.path.isdir(os.path.join(d, n)))
+            except OSError:
+                return []
+    return []
+
+
+def snapshot_kernel_info(root: str, snapdir: str, snap_name: str) -> dict:
+    """Noyau courant vs noyau(x) d'un instantané → {current, snapshot_kernels, mismatch}.
+
+    Le noyau de démarrage vit dans la partition EFI (/boot), pas dans le
+    sous-volume racine ; un instantané, lui, ne conserve que les MODULES
+    (`usr/lib/modules/<ver>`).  Restaurer un instantané pris avant une mise
+    à jour du noyau laisse donc la racine restaurée sans les modules du
+    noyau qui démarrera (celui de l'ESP), ce qui peut échouer au boot.
+
+    Renvoie un dict :
+      * current           : version du noyau en cours (`uname -r`)
+      * snapshot_kernels  : liste des versions de noyau présentes dans l'instantané
+      * mismatch          : True si l'instantané n'a AUCUN module du noyau courant
+                            (donc noyau différent → avertissement)
+    """
+    current = _kernel_release()
+    rel = _snaprel(snap_name)
+    base = os.path.join(root, snapdir, rel)
+    kernels = _snapshot_module_dirs(base)
+    if not kernels and not os.path.isdir(base):
+        # Le snapdir peut ne pas être monté comme un simple dossier (quand on
+        # a booté sur le sous-volume snapshots) : montage temporaire de la
+        # racine du FS, comme list_snapshots().
+        try:
+            with fs_root_mount(root) as r:
+                kernels = _snapshot_module_dirs(os.path.join(r, snapdir, rel))
+        except (SystemExit, Exception):
+            kernels = []
+    mismatch = bool(kernels) and not any(fver_match(k, current) for k in kernels)
+    return {"current": current, "snapshot_kernels": kernels, "mismatch": mismatch}
 
 
 def _e2l(path: str) -> str:
@@ -2252,12 +2377,51 @@ class TUI:
         except Exception as e:
             print(f"Warning: sync boot ignorée: {e}")
 
+    def ask_boot_action(self, action: str, body: str = ""):
+        """Prévient que l'opération touche les instantanés et laisse choisir
+        d'adapter (ou non) les entrées de démarrage systemd-boot.
+
+        Affiche le contexte (avertissement noyau éventuel + nature de
+        l'opération) puis propose trois issues :
+          * "adapt" → adapter le menu systemd-boot après l'opération ;
+          * "skip"  → effectuer l'opération sans toucher au menu de démarrage ;
+          * None    → annuler (ne rien faire).
+        """
+        title = _("Adapter les entrées de démarrage systemd-boot ?")
+        info = [_f("Opération : {action}", action=action)]
+        if body:
+            info.extend(body.rstrip().splitlines())
+        info.append("")
+        info.extend([
+            _("• Adapter systemd-boot : mettre le menu de démarrage à jour."),
+            _("• Ne pas adapter : laisser le menu de démarrage inchangé."),
+            _("• Annuler : ne rien faire."),
+        ])
+        choices = [_("Adapter systemd-boot"),
+                   _("Ne pas adapter"),
+                   _("Annuler")]
+        items = info + choices
+        n_info = len(info)
+        while True:
+            idx = self.select(title, items,
+                              footer=_("↑/↓ naviguer · Entrée ou clic souris "
+                                       "choisir · Échap annuler"),
+                              default=n_info, numbered=False)
+            if not isinstance(idx, int):
+                return None
+            if idx < n_info:
+                continue        # ligne d'information : on redemande le choix
+            return ("adapt", "skip", None)[idx - n_info]
+
     def do_create(self):
         name = self.ask(_("Nom du snapshot"), now_stamp())
-        self.confirm(_f("Créer un snapshot de {root} → {snapdir}/{name}",
-                        root=self.root, snapdir=self.snapdir, name=name))
+        boot = self.ask_boot_action(
+            _f("Créer l'instantané « {name} »", name=name))
+        if boot is None:
+            print(_("Annulé.")); self.pause(); return
         create_snapshot(self.root, self.snapdir, name)
-        self.sync_boot()
+        if boot == "adapt":
+            self.sync_boot()
         self.pause()
 
     def do_list(self):
@@ -2316,6 +2480,7 @@ class TUI:
         # -- 2e choix: détail selon la fréquence ---------------------------
         boot = False
         boot_delay = 5
+        once_per_day = False
         schedule = ""
         if freq == "daily":
             # Chaque jour: heure précise OU au démarrage.
@@ -2339,6 +2504,11 @@ class TUI:
                         break
                     except ValueError:
                         print(_("Nombre invalide"))
+                # En mode démarrage: proposer de n'effectuer qu'un seul
+                # instantané par jour (skip si un instantané du jour existe).
+                once_per_day = self.ask_yn(
+                    _("N'effectuer qu'un seul instantané par jour "
+                      "(ignoré si un instantané du jour existe déjà) ?"))
             else:
                 hour = self._ask_hour()
             schedule = f"*-*-* {hour:02d}:00:00" if not boot else ""
@@ -2377,8 +2547,12 @@ class TUI:
         tag = self.ask(_("Nom du plan (ex. daily, weekly)"), freq)
 
         if boot:
-            plan_desc = _f("Au démarrage de la machine ({delay} min après le boot)",
-                           delay=boot_delay)
+            if once_per_day:
+                plan_desc = _f("Au démarrage de la machine ({delay} min après "
+                               "le boot, un seul par jour)", delay=boot_delay)
+            else:
+                plan_desc = _f("Au démarrage de la machine ({delay} min "
+                               "après le boot)", delay=boot_delay)
         else:
             plan_desc = f"OnCalendar={schedule}"
         self.confirm(
@@ -2389,7 +2563,8 @@ class TUI:
                tag=tag, plan=plan_desc, keep=keep,
                root=self.root, snapdir=self.snapdir))
         write_timer_files(self.root, self.snapdir, tag, schedule, keep,
-                          boot=boot, boot_delay=boot_delay)
+                          boot=boot, boot_delay=boot_delay,
+                          once_per_day=once_per_day)
         self.pause()
 
     def do_remove_timer(self):
@@ -2437,18 +2612,33 @@ class TUI:
         # PRINCIPAL (typ. @), pas le sous-volume monté sur / (qui peut
         # être un snapshot quand on a booté dessus via systemd-boot).
         at = boot_subvol(self.root) or _("(racine du FS)")
-        self.confirm(
-            _f("Restaurer {snap} en premier plan par deux mv (CoW) ?\n\n"
-               "  1. mv  {at} → {snapdir}/{at}_old-<date-heure>  "
-               "(conserve l'actuel)\n"
-               "  2. mv  {snapdir}/{snap} → {at}  "
-               "(le snapshot devient le volume de boot)\n\n"
-               "Le sous-volume courant n'est pas perdu: il reste dans "
-               "{snapdir}/.\n"
-               "Redémarrez ensuite pour booter sur la version restaurée.",
-               snap=snap['path'], at=at, snapdir=self.snapdir))
+        body = _f("Restaurer {snap} en premier plan par deux mv (CoW) ?\n\n"
+                  "  1. mv  {at} → {snapdir}/{at}_old-<date-heure>  "
+                  "(conserve l'actuel)\n"
+                  "  2. mv  {snapdir}/{snap} → {at}  "
+                  "(le snapshot devient le volume de boot)\n\n"
+                  "Le sous-volume courant n'est pas perdu: il reste dans "
+                  "{snapdir}/.\n"
+                  "Redémarrez ensuite pour booter sur la version restaurée.",
+                  snap=snap['path'], at=at, snapdir=self.snapdir)
+        # Prévenir si le noyau a changé depuis l'instantané : le noyau de
+        # démarrage vit dans l'ESP (/boot), pas dans l'instantané — la racine
+        # restaurée peut ne plus avoir les modules du noyau qui démarrera.
+        try:
+            kinfo = snapshot_kernel_info(self.root, self.snapdir, snap["path"])
+        except Exception:
+            kinfo = None
+        if kinfo and kinfo.get("mismatch"):
+            snap_ks = ", ".join(kinfo.get("snapshot_kernels") or []) or "?"
+            body = _f(KERNEL_MISMATCH_WARNING, cur=kinfo.get("current", "?"),
+                      snaps=snap_ks) + "\n\n" + body
+        boot = self.ask_boot_action(
+            _f("Restaurer « {name} »", name=snap['path']), body)
+        if boot is None:
+            print(_("Annulé.")); self.pause(); return
         restore_snapshot(self.root, self.snapdir, snap["path"])
-        self.sync_boot()
+        if boot == "adapt":
+            self.sync_boot()
         # Option de redémarrage immédiate pour booter sur la version restaurée
         if self.ask_yn(_("\nRedémarrer maintenant pour booter sur la version "
                          "restaurée ?")):
@@ -2479,15 +2669,14 @@ class TUI:
         if not isinstance(sel, list) or not sel:
             print(_("Aucune sélection valide.")); self.pause(); return
         targets = [snaps_r[i] for i in sel]
-        # Récapitulatif des instantanés visés + confirmation.
-        # Répondre NON annule la suppression (retour au menu), ne quitte pas.
+        # Récapitulatif des instantanés visés + choix d'adapter le menu de
+        # démarrage.  « Annuler » revient au menu (ne quitte pas le programme).
         recap = [f"{t['path']}   (gen {t['gen']})" for t in targets]
-        self.render(
-            _f(" Confirmer la suppression — {n} instantané(s)",
-               n=len(targets)),
-            recap,
-            _("Ces instantanés seront SUPPRIMÉS définitivement."))
-        if not self.ask_yn(_("Confirmer la suppression ?")):
+        body = _("Ces instantanés seront SUPPRIMÉS définitivement.") + "\n\n" \
+            + "\n".join(recap)
+        boot = self.ask_boot_action(
+            _f("Supprimer {n} snapshot(s)", n=len(targets)), body)
+        if boot is None:
             print(_("Annulé.")); self.pause(); return
         ok = 0
         for t in targets:
@@ -2499,7 +2688,8 @@ class TUI:
                 print(_f("  Échec: {full} — {err}", full=t['full'],
                          err=out.strip()))
         print(_f("{ok}/{n} supprimé(s).", ok=ok, n=len(targets)))
-        self.sync_boot()
+        if boot == "adapt":
+            self.sync_boot()
         self.pause()
 
     @staticmethod
@@ -2564,12 +2754,16 @@ class TUI:
             print(_("Aucun snapshot à supprimer (déjà ≤ N)."))
             self.pause()
             return
-        self.render(_f(" Rétention — conserver {keep}, supprimer {n}",
-                       keep=keep, n=len(to_del)),
-                    [s['path'] for s in to_del],
-                    _("Les snapshots listés seront SUPPRIMÉS."))
-        self.confirm(_("Confirmer la suppression ?"))
+        # Liste des instantanés visés + choix d'adapter le menu de démarrage.
+        body = _("Les snapshots listés seront SUPPRIMÉS.") + "\n\n" \
+            + "\n".join(s['path'] for s in to_del)
+        boot = self.ask_boot_action(
+            _f("Rétention : garder {keep}", keep=keep), body)
+        if boot is None:
+            print(_("Annulé.")); self.pause(); return
         prune_snapshots(self.root, self.snapdir, keep)
+        if boot == "adapt":
+            self.sync_boot()
         self.pause()
 
     def do_info(self):
