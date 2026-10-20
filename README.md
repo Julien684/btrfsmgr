@@ -36,6 +36,16 @@ sudo eopkg install https://github.com/Julien684/btrfsmgr/raw/main/btrfsmgr-1.0.1
 > (dans `build_eopkg.py` → `RELEASE`) pour produire un nouveau nom de
 > fichier, ce qui force eopkg à le traiter comme un paquet neuf — pas besoin
 > de `sudo eopkg delete-cache` sur la cible.
+
+### Installation via eopkg du dépôt Linuxon
+
+```sh
+# Téléchargement et installation direct du paquet depuis Github :
+sudo eopkg install btrfsmgr
+```
+
+> Plus d'information ici [eopkg-repo - Github](https://github.com/Julien684/eopkg-repo)
+
 ### Désinstallation via paquet eopkg (Solus)
 ```sh
 # Désinstallation
@@ -247,6 +257,16 @@ sudo eopkg install https://github.com/Julien684/btrfsmgr/raw/main/btrfsmgr-1.0.1
 > `build_eopkg.py` → `RELEASE`) to produce a new filename, which makes
 > eopkg treat it as a fresh package — no need for
 > `sudo eopkg delete-cache` on the target.
+
+### Installation via eopkg from the Linuxon repository
+
+```sh
+# Direct download and installation of the package from GitHub:
+sudo eopkg install btrfsmgr
+```
+
+> More information here [eopkg-repo - GitHub](https://github.com/Julien684/eopkg-repo)
+
 ### Uninstallation via eopkg package (Solus)
 ```sh
 # Uninstall
