@@ -26,8 +26,8 @@ SRC_DIR = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(".")
 OUT_DIR = Path(sys.argv[2]) if len(sys.argv) > 2 else SRC_DIR
 
 PACKAGE_NAME   = "btrfsmgr"
-VERSION        = "1.0.14"   # must match VERSION in btrfsmgr.py
-RELEASE        = 3   # bump on every republish with the same VERSION — eopkg caches by FILENAME, not by content hash; same name = stale cache
+VERSION        = "1.0.15"   # must match VERSION in btrfsmgr.py
+RELEASE        = 9   # bump on every republish with the same VERSION — eopkg caches by FILENAME, not by content hash; same name = stale cache
 DIST_RELEASE   = 1
 ARCH           = "x86_64"
 DIST_NAME      = "Solus"
@@ -43,7 +43,8 @@ PART_OF        = "system.utilities"
 # On Solus, /bin is a symlink to /usr/bin, so we install to usr/bin.
 FILE_LIST = [
     # (dest_path, src_rel_path, mode)
-    ("usr/bin/btrfsmgr",                          "btrfsmgr.py",         0o755),
+    # Binaire Rust unique (la branche rust-migration remplace btrfsmgr.py).
+    ("usr/bin/btrfsmgr",                          "target/release/btrfsmgr", 0o755),
     ("usr/share/applications/btrfsmgr.desktop",   "btrfsmgr.desktop",    0o644),
     ("usr/share/doc/btrfsmgr/README.md",          "README.md",           0o644),
     ("usr/share/licenses/btrfsmgr/LICENSE",       "LICENSE",             0o644),
@@ -65,9 +66,9 @@ sur Linux. Il permet de créer, lister, restaurer et supprimer des instantanés 
 de planifier des instantanés automatiques via des timers systemd avec une
 politique de rétention ; et de générer des entrées de démarrage (GRUB /
 systemd-boot) pour booter directement sur un instantané. La restauration est
-un échange CoW (deux renommages) — aucune donnée n'est copiée. Nécessite
-btrfs-progs et Python 3.8+ (bibliothèque standard uniquement, sans dépendance
-tierce). Non officiel ; non affilié à Solus ni au projet BTRFS."""
+un échange CoW (deux renommages) — aucune donnée n'est copiée. Écrit en Rust
+(binaire unique, sans dépendance Python). Nécessite btrfs-progs et systemd.
+Non officiel ; non affilié à Solus ni au projet BTRFS."""
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -185,8 +186,9 @@ It supports creating, listing, restoring, and deleting snapshots; scheduling
 automatic snapshots via systemd timers with a retention policy; and generating
 boot entries (GRUB / systemd-boot) so you can boot directly into a snapshot.
 Restore is a CoW swap (two renames) - no data is copied.
-Requires btrfs-progs and Python 3.8+ (standard library only, no third-party
-dependencies). Unofficial; not affiliated with Solus or the BTRFS project.""")}</Description>
+Written in Rust (single binary, no Python dependency).
+Requires btrfs-progs and systemd. Unofficial; not affiliated with Solus or the
+BTRFS project.""")}</Description>
         <Summary xml:lang="fr">{_FR_SUMMARY}</Summary>
         <Description xml:lang="fr">{_FR_DESCRIPTION}</Description>
         <PartOf>{PART_OF}</PartOf>

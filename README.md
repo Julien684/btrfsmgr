@@ -11,10 +11,9 @@
 > des tests unitaires et vérifié de bout en bout sur un vrai VM Solus,
 > mais son code n'a pas été relu ligne par ligne par un humain — gardez
 > cela en tête avant de vous y fier.
->
 
-Gestionnaire d'instantanés BTRFS pour Linux : TUI sans dépendance
-(standard Python uniquement), timers systemd avec rétention,
+Gestionnaire d'instantanés BTRFS pour Linux : TUI écrite en Rust
+(binaire unique, sans dépendance), timers systemd avec rétention,
 restauration, et entrées de boot GRUB / systemd-boot.
 
 > **Non officiel / Non affilié à Solus ni à BTRFS. Codé par Vibe. 
@@ -25,8 +24,8 @@ restauration, et entrées de boot GRUB / systemd-boot.
 ### Installation via paquet eopkg (Solus)
 
 ```sh
-# Téléchargement et installation direct du paquet depuis Gitea (depoa) :
-sudo eopkg install https://github.com/Julien684/btrfsmgr/raw/main/btrfsmgr-1.0.14-3-1-x86_64.eopkg
+# Téléchargement et installation direct du paquet depuis GitHub :
+sudo eopkg install https://github.com/Julien684/btrfsmgr/raw/main/btrfsmgr-1.0.15-9-1-x86_64.eopkg
 ```
 
 > **Pourquoi le *release* dans le nom de fichier** : eopkg met en cache les
@@ -40,13 +39,14 @@ sudo eopkg install https://github.com/Julien684/btrfsmgr/raw/main/btrfsmgr-1.0.1
 ### Installation via eopkg du dépôt Linuxon
 
 ```sh
-# Téléchargement et installation direct du paquet depuis Github :
+# Téléchargement et installation direct du paquet depuis GitHub :
 sudo eopkg install btrfsmgr
 ```
 
 > Plus d'information ici [eopkg-repo - Github](https://github.com/Julien684/eopkg-repo)
 
 ### Désinstallation via paquet eopkg (Solus)
+
 ```sh
 # Désinstallation
 sudo eopkg remove btrfsmgr
@@ -55,28 +55,32 @@ sudo eopkg remove btrfsmgr
 > **Testé et fonctionnel** : l'installation et la désinstallation via eopkg
 > ont été vérifiées sur Solus 4.9 (eopkg 5.0.0).
 
-### Installation via le script (toute distribution Linux)
+### Depuis les sources (Rust)
 
 ```sh
 # 1. Cloner le dépôt
 git clone https://github.com/Julien684/btrfsmgr.git
 cd btrfsmgr
 
-# 2. Installer
-sudo ./install.sh
+# 2. Compiler et installer
+cargo build --release
+sudo install -Dm755 target/release/btrfsmgr /usr/local/bin/btrfsmgr
 ```
-### Désinstallation via le script (toute distribution Linux)
+
+### Désinstallation (toute distribution Linux)
 
 ```sh
 sudo btrfsmgr uninstall
 ```
+
 # Utilisation
+
 ```sh
 sudo btrfsmgr                 # gère le sous-volume /
 sudo btrfsmgr /mnt/backup     # gère un autre sous-volume BTRFS
 ```
 
-Dépendances : `btrfs-progs`, `python3 ≥ 3.8`, `systemd` (timers).
+Dépendances : `btrfs-progs`, `systemd` (timers).
 
 La restauration ne nécessite **ni rsync ni copie** : c'est un swap CoW
 de sous-volumes (deux `mv`).
@@ -97,28 +101,25 @@ sudo btrfsmgr update
 
 * interroge les tags du dépôt GitHub (API GitHub, sinon `git ls-remote`) ;
 * compare la version distante à la version locale ;
-* si une version **supérieure** est disponible, il la propose et, sur
-  confirmation, clône cette version (clone temporaire) puis relance
-  `install.sh` — le dépôt de travail local n'est pas modifié ;
-* sinon il affiche « Vous êtes déjà à jour » (réinstallation locale
-  possible) ;
-* hors ligne ou dépôt sans tag, il relance l'`install.sh` local
-  (comportement historique) : `btrfsmgr update /chemin/vers/le/depot`.
+* si une version **supérieure** est disponible, il l'affiche et indique la
+  commande de mise à jour : `sudo eopkg upgrade btrfsmgr` ;
+* sinon il affiche « Vous êtes déjà à jour » ;
+* hors ligne ou dépôt sans tag, il l'indique et renvoie un code d'erreur.
 
 ## Fonctionnalités
 
-| Menu | Action |
-|------|--------|
-| 1 | Créer un instantané (read-only) dans `@snapshots/` |
-| 2 | Listez les instantanés + autres sous-volumes |
-| 3 | Restaurer : swap CoW (deux `mv`) — le snapshot devient `@`, l'ancien `@` est conservé dans `snapshots/@_old-<date-heure>` (tout est CoW, rien n'est copié) |
-| 4 | Supprimer un instantané (un seul, plusieurs `1,3,5`, ou `tous`) |
-| 5 | Programmer des snapshots automatiques (timer systemd) avec planning `OnCalendar` (ex. `daily`, `weekly`, `Mon *-*-* 03:00:00`) et rétention (conserver les N plus récents, supprimer les plus anciens) |
-| 6 | Supprimer une automatisation (timer systemd) |
-| 7 | Rétention manuelle : supprimer tous les snapshots sauf les N plus récents |
-| 8 | Infos : chargeur de boot détecté, timers actifs, espace disque |
-| 9 | Menu systemd-boot : afficher/masquer le menu au démarrage (timeout) |
-| 10 | Quitter |
+| Menu | Action                                                                                                                                                                                                 |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1    | Créer un instantané (read-only) dans `@snapshots/`                                                                                                                                                     |
+| 2    | Listez les instantanés + autres sous-volumes                                                                                                                                                           |
+| 3    | Restaurer : swap CoW (deux `mv`) — le snapshot devient `@`, l'ancien `@` est conservé dans `snapshots/@_old-<date-heure>` (tout est CoW, rien n'est copié)                                             |
+| 4    | Supprimer un instantané (un seul, plusieurs `1,3,5`, ou `tous`)                                                                                                                                        |
+| 5    | Programmer des snapshots automatiques (timer systemd) avec planning `OnCalendar` (ex. `daily`, `weekly`, `Mon *-*-* 03:00:00`) et rétention (conserver les N plus récents, supprimer les plus anciens) |
+| 6    | Supprimer une automatisation (timer systemd)                                                                                                                                                           |
+| 7    | Rétention manuelle : supprimer tous les snapshots sauf les N plus récents                                                                                                                              |
+| 8    | Infos : chargeur de boot détecté, timers actifs, espace disque                                                                                                                                         |
+| 9    | Menu systemd-boot : afficher/masquer le menu au démarrage (timeout)                                                                                                                                    |
+| 10   | Quitter                                                                                                                                                                                                |
 
 ## État des tests
 
@@ -159,6 +160,7 @@ choix, puis `systemctl disable --now` + suppression des fichiers dans
 * **GRUB** : une entrée `menuentry` est générée dans
   `/etc/grub.d/40_btrfsmgr_snapshots` (puis `grub-mkconfig` régénère
   `grub.cfg` si disponible).
+
 * **systemd-boot** : une entrée UEFI est écrite dans
   `/boot/loader/entries/btrfsmgr-<nom>.conf`.
 
@@ -232,10 +234,9 @@ Crée `//@snapshots/test` puis ne garde que les 3 plus récents.
 > tests and verified end to end on a real Solus VM, but its code has
 > not been reviewed line by line by a human — keep that in mind before
 > relying on it.
->
 
-BTRFS snapshot manager for Linux: dependency-free TUI (standard Python
-only), systemd timers with retention, restoration, and GRUB /
+BTRFS snapshot manager for Linux: TUI written in Rust
+(single binary, no runtime dependency), systemd timers with retention, restoration, and GRUB /
 systemd-boot boot entries.
 
 > **Unofficial / Not affiliated with Solus or BTRFS. Vibe coded.
@@ -246,8 +247,8 @@ systemd-boot boot entries.
 ### Installation via eopkg package (Solus)
 
 ```sh
-# Direct download and installation of the package from Gitea (depoa):
-sudo eopkg install https://github.com/Julien684/btrfsmgr/raw/main/btrfsmgr-1.0.14-3-1-x86_64.eopkg
+# Direct download and installation of the package from GitHub:
+sudo eopkg install https://github.com/Julien684/btrfsmgr/raw/main/btrfsmgr-1.0.15-9-1-x86_64.eopkg
 ```
 
 > **Why the *release* in the filename**: eopkg caches `.eopkg` files
@@ -265,9 +266,10 @@ sudo eopkg install https://github.com/Julien684/btrfsmgr/raw/main/btrfsmgr-1.0.1
 sudo eopkg install btrfsmgr
 ```
 
-> More information here [eopkg-repo - GitHub](https://github.com/Julien684/eopkg-repo)
+> More information here [eopkg-repo - Github](https://github.com/Julien684/eopkg-repo)
 
 ### Uninstallation via eopkg package (Solus)
+
 ```sh
 # Uninstall
 sudo eopkg remove btrfsmgr
@@ -276,28 +278,32 @@ sudo eopkg remove btrfsmgr
 > **Tested and working**: installation and uninstallation via eopkg
 > have been verified on Solus 4.9 (eopkg 5.0.0).
 
-### Installation via script (any Linux distribution)
+### From source (Rust)
 
 ```sh
 # 1. Clone the repository
 git clone https://github.com/Julien684/btrfsmgr.git
 cd btrfsmgr
 
-# 2. Install
-sudo ./install.sh
+# 2. Build and install
+cargo build --release
+sudo install -Dm755 target/release/btrfsmgr /usr/local/bin/btrfsmgr
 ```
-### Uninstallation via script (any Linux distribution)
+
+### Uninstallation (any Linux distribution)
 
 ```sh
 sudo btrfsmgr uninstall
 ```
+
 # Usage
+
 ```sh
 sudo btrfsmgr                 # manages the / subvolume
 sudo btrfsmgr /mnt/backup     # manages another BTRFS subvolume
 ```
 
-Dependencies: `btrfs-progs`, `python3 ≥ 3.8`, `systemd` (timers).
+Dependencies: `btrfs-progs`, `systemd` (timers).
 
 Restoration requires **no rsync and no copy**: it is a CoW subvolume
 swap (two `mv` commands).
@@ -318,29 +324,26 @@ sudo btrfsmgr update
 
 * queries the repository tags (API, otherwise `git ls-remote`);
 * compares the remote version to the local version;
-* if a **higher** version is available, it offers it and, upon
-  confirmation, clones that version (temporary clone) then re-runs
-  `install.sh` — your local working repository is not modified;
-* otherwise it displays "You are already up to date" (local
-  reinstallation is still possible);
-* offline, or if the repository has no tags, it falls back to the
-  local `install.sh` (historical behavior):
-  `btrfsmgr update /path/to/the/repository`.
+* if a **higher** version is available, it prints it and the upgrade
+  command: `sudo eopkg upgrade btrfsmgr`;
+* otherwise it displays "You are already up to date";
+* offline, or if the repository has no tags, it says so and returns an
+  error code.
 
 ## Features
 
-| Menu | Action |
-|------|--------|
-| 1 | Create a snapshot (read-only) in `@snapshots/` |
-| 2 | List snapshots + other subvolumes |
-| 3 | Restore: CoW swap (two `mv`) — the snapshot becomes `@`, the old `@` is kept in `snapshots/@_old-<date-time>` (everything is CoW, nothing is copied) |
-| 4 | Delete a snapshot (single one, several `1,3,5`, or `all`) |
-| 5 | Schedule automatic snapshots (systemd timer) with `OnCalendar` planning (e.g. `daily`, `weekly`, `Mon *-*-* 03:00:00`) and retention (keep the N most recent, delete the oldest) |
-| 6 | Remove an automation (systemd timer) |
-| 7 | Manual retention: delete all snapshots except the N most recent |
-| 8 | Info: detected boot loader, active timers, disk space |
-| 9 | systemd-boot menu: show/hide the boot menu (timeout) |
-| 10 | Quit |
+| Menu | Action                                                                                                                                                                           |
+| ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1    | Create a snapshot (read-only) in `@snapshots/`                                                                                                                                   |
+| 2    | List snapshots + other subvolumes                                                                                                                                                |
+| 3    | Restore: CoW swap (two `mv`) — the snapshot becomes `@`, the old `@` is kept in `snapshots/@_old-<date-time>` (everything is CoW, nothing is copied)                             |
+| 4    | Delete a snapshot (single one, several `1,3,5`, or `all`)                                                                                                                        |
+| 5    | Schedule automatic snapshots (systemd timer) with `OnCalendar` planning (e.g. `daily`, `weekly`, `Mon *-*-* 03:00:00`) and retention (keep the N most recent, delete the oldest) |
+| 6    | Remove an automation (systemd timer)                                                                                                                                             |
+| 7    | Manual retention: delete all snapshots except the N most recent                                                                                                                  |
+| 8    | Info: detected boot loader, active timers, disk space                                                                                                                            |
+| 9    | systemd-boot menu: show/hide the boot menu (timeout)                                                                                                                             |
+| 10   | Quit                                                                                                                                                                             |
 
 ## Testing status
 
@@ -381,6 +384,7 @@ you pick one, then `systemctl disable --now` + deletion of the files in
 * **GRUB**: a `menuentry` entry is generated in
   `/etc/grub.d/40_btrfsmgr_snapshots` (then `grub-mkconfig` regenerates
   `grub.cfg` if available).
+
 * **systemd-boot**: a UEFI entry is written in
   `/boot/loader/entries/btrfsmgr-<name>.conf`.
 
