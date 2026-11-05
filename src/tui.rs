@@ -845,6 +845,9 @@ impl Tui {
             boot_delay,
             once_per_day,
         );
+        // Créer une automatisation doit aussi mettre le menu de démarrage à
+        // jour pour les instantanés DÉJÀ présents (comme au démarrage du TUI).
+        self.sync_boot();
         self.pause();
     }
 
