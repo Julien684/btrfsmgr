@@ -1135,6 +1135,12 @@ impl Tui {
             println!("{}", t("ERREUR: exécuter en root:  sudo btrfsmgr"));
             return 1;
         }
+        // Réécrire le script d'instantané au démarrage (root) : après une
+        // mise à jour du paquet, le script déjà installé (utilisé par les
+        // timers) bénéficie des correctifs sans recréer les automatisations.
+        if is_root() {
+            install_snap_script();
+        }
         if !btrfs_available() {
             println!(
                 "{}",

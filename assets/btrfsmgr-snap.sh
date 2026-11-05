@@ -171,8 +171,20 @@ prune_snapshots "$ROOT" "$SNAPDIR" "$KEEP"
 # Resynchroniser les entrées systemd-boot (comme en création manuelle):
 # ajouter le nouveau snapshot, retirer les .conf des snapshots prunés.
 # No-op silencieux si le chargeur n'est pas systemd-boot.
-for _bm in $(command -v btrfsmgr) /bin/btrfsmgr /usr/local/bin/btrfsmgr; do
-    [[ -x "$_bm" ]] || continue
-    "$_bm" sync "$ROOT" --snapdir "$SNAPDIR" || true
-    break
-done
+_bm_sync() {
+    local b
+    for b in $(command -v btrfsmgr) /bin/btrfsmgr /usr/local/bin/btrfsmgr; do
+        [[ -x "$b" ]] || continue
+        "$b" sync "$ROOT" --snapdir "$SNAPDIR" || true
+        return 0
+    done
+    # Paquet GUI seul : il ne fournit plus /usr/bin/btrfsmgr, mais son
+    # binaire expose la même sous-commande « sync » en mode headless.
+    for b in $(command -v btrfsmgr-gui) /bin/btrfsmgr-gui /usr/local/bin/btrfsmgr-gui; do
+        [[ -x "$b" ]] || continue
+        "$b" sync "$ROOT" --snapdir "$SNAPDIR" || true
+        return 0
+    done
+    return 0
+}
+_bm_sync

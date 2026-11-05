@@ -37,7 +37,7 @@ dépendance à Python, supprimé du dépôt) :
 
 ## État
 
-* L'`.eopkg` Rust est construit : `btrfsmgr-1.0.15-10-1-x86_64.eopkg`
+* L'`.eopkg` Rust est construit : `btrfsmgr-1.0.15-12-1-x86_64.eopkg`
   (binaire unique, aucune dépendance Python).
 * Le script `install.sh` a été retiré : l'installation depuis les sources se
   fait par `cargo build --release` puis copie du binaire.
