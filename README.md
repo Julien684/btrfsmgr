@@ -25,7 +25,7 @@ restauration, et entrées de boot GRUB / systemd-boot.
 
 ```sh
 # Téléchargement et installation direct du paquet depuis GitHub :
-sudo eopkg install https://github.com/Julien684/btrfsmgr/raw/main/btrfsmgr-1.0.15-12-1-x86_64.eopkg
+sudo eopkg install https://github.com/Julien684/btrfsmgr/releases/download/v1.0.15/btrfsmgr-1.0.15-12-1-x86_64.eopkg
 ```
 
 > **Pourquoi le *release* dans le nom de fichier** : eopkg met en cache les
@@ -248,7 +248,7 @@ systemd-boot boot entries.
 
 ```sh
 # Direct download and installation of the package from GitHub:
-sudo eopkg install https://github.com/Julien684/btrfsmgr/raw/main/btrfsmgr-1.0.15-12-1-x86_64.eopkg
+sudo eopkg install https://github.com/Julien684/btrfsmgr/releases/download/v1.0.15/btrfsmgr-1.0.15-12-1-x86_64.eopkg
 ```
 
 > **Why the *release* in the filename**: eopkg caches `.eopkg` files

@@ -28,3 +28,6 @@ test_*.sh
 
 # Rust
 /target/
+
+# Artefact publie dans les releases, plus dans l arbre
+*.eopkg
