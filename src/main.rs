@@ -139,6 +139,7 @@ fn main() {
         }
         "sync" => {
             sync_bootloader_entries(&root, &snapdir, true);
+            release_boot_mount();
             0
         }
         "delete-snap" => {
@@ -164,6 +165,7 @@ fn main() {
                     }
                 }
                 sync_bootloader_entries(&root, &snapdir, false);
+                release_boot_mount();
                 if ok { 0 } else { 1 }
             }
         }
@@ -179,7 +181,9 @@ fn main() {
                 println!("Warning: synchronisation boot ignorée");
             }
             let mut tui = Tui::new(&root, &snapdir);
-            tui.run()
+            let rc = tui.run();
+            release_boot_mount();
+            rc
         }
     };
     std::process::exit(code);

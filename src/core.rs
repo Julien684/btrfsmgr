@@ -10,6 +10,7 @@ use std::fs;
 use std::io::Write;
 use std::path::Path;
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::i18n::t;
 
@@ -33,6 +34,10 @@ pub const PROJECT_REPO_URL: &str = "https://depoa.julien68.fr/Linuxon/btrfsmgr.g
 pub const PROJECT_API: &str = "https://depoa.julien68.fr/api/v1/repos/Linuxon/btrfsmgr";
 
 pub const DEFAULT_SNAPDIR: &str = "snapshots";
+
+/// Vrai si c'est CE processus qui a monté /boot (et doit donc le démonter en
+/// sortie). Si /boot était déjà monté au lancement, on n'y touche pas.
+static BOOT_MOUNTED_BY_US: AtomicBool = AtomicBool::new(false);
 
 /// Avertissement noyau (même texte que le Python, clé de traduction incluse).
 pub const KERNEL_MISMATCH_WARNING: &str = "⚠ Différence de noyau détectée !\n  Noyau en cours        : {cur}\n  Noyau de l'instantané : {snaps}\n\nLe noyau de démarrage vit dans la partition EFI (/boot), pas dans l'instantané (qui ne conserve que les modules usr/lib/modules). Après restauration, la racine restaurée n'aura pas les modules du noyau {cur} qui démarrera : le démarrage peut échouer ou être dégradé.";
@@ -1377,9 +1382,13 @@ fn e2l(path: &str) -> String {
     format!("/boot/{p}")
 }
 
+pub fn boot_is_mounted() -> bool {
+    runv(&sargs(&["findmnt", "-n", "-o", "SOURCE", "/boot"]), false).0 == 0
+}
+
 pub fn ensure_boot_mounted() -> bool {
-    let mounted = runv(&sargs(&["findmnt", "-n", "-o", "SOURCE", "/boot"]), false).0 == 0;
-    if mounted {
+    if boot_is_mounted() {
+        // Déjà monté avant nous : on le laissera monté en sortie.
         return true;
     }
     sayln!("( /boot n'est pas monté — tentative de montage… )");
@@ -1397,7 +1406,19 @@ pub fn ensure_boot_mounted() -> bool {
             }
         }
     }
-    runv(&sargs(&["findmnt", "-n", "-o", "SOURCE", "/boot"]), false).0 == 0
+    let ok = boot_is_mounted();
+    if ok {
+        BOOT_MOUNTED_BY_US.store(true, Ordering::SeqCst);
+    }
+    ok
+}
+
+/// Démonter /boot uniquement si c'est nous qui l'avons monté.
+pub fn release_boot_mount() {
+    if BOOT_MOUNTED_BY_US.swap(false, Ordering::SeqCst) {
+        runv(&sargs(&["umount", "/boot"]), false);
+        sayln!("  - /boot démonté (monté par btrfsmgr).");
+    }
 }
 
 /// (device racine, image noyau, image initrd) relatifs à /boot.
