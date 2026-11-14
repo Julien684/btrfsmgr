@@ -24,7 +24,12 @@
     <keyword>restore</keyword>
     <keyword>tui</keyword>
   </keywords>
+  <screenshots>
+    <screenshot type="default">
+      <image type="source">https://raw.githubusercontent.com/Julien684/btrfsmgr/main/screenshot.png</image>
+    </screenshot>
+  </screenshots>
   <releases>
-    <release version="1.0.15" date="2026-11-09"/>
+    <release version="1.0.15" date="2026-11-14"/>
   </releases>
 </component>
