@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>fr.julien68.BtrfsManager</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <developer id="fr.julien68"><name>Julien</name></developer>
+  <name>BTRFS Manager</name>
+  <summary>BTRFS snapshot manager TUI - create, list, restore, and automate BTRFS subvolume snapshots</summary>
+  <summary xml:lang="fr">Gestionnaire d'instantanés BTRFS en TUI — créer, lister, restaurer et automatiser les instantanés de sous-volumes BTRFS</summary>
+  <launchable type="desktop-id">btrfsmgr.desktop</launchable>
+  <url type="homepage">https://github.com/Julien684/btrfsmgr</url>
+  <content_rating type="oars-1.1"/>
+  <description>
+    <p>btrfsmgr is a TUI tool for managing BTRFS subvolume snapshots on Linux. It supports creating, listing, restoring, and deleting snapshots; scheduling automatic snapshots via systemd timers with a retention policy; and generating boot entries (GRUB / systemd-boot) so you can boot directly into a snapshot. Restore is a CoW swap (two renames) - no data is copied. Written in Rust (single binary, no Python dependency). Requires btrfs-progs and systemd. Unofficial; not affiliated with Solus or the BTRFS project.</p>
+    <p xml:lang="fr">btrfsmgr est un outil TUI pour gérer les instantanés de sous-volumes BTRFS sur Linux. Il permet de créer, lister, restaurer et supprimer des instantanés ; de planifier des instantanés automatiques via des timers systemd avec une politique de rétention ; et de générer des entrées de démarrage (GRUB / systemd-boot) pour booter directement sur un instantané. La restauration est un échange CoW (deux renommages) — aucune donnée n'est copiée. Écrit en Rust (binaire unique, sans dépendance Python). Nécessite btrfs-progs et systemd. Non officiel ; non affilié à Solus ni au projet BTRFS.</p>
+  </description>
+  <categories>
+    <category>System</category>
+  </categories>
+  <keywords>
+    <keyword>btrfs</keyword>
+    <keyword>snapshot</keyword>
+    <keyword>subvolume</keyword>
+    <keyword>restore</keyword>
+    <keyword>tui</keyword>
+  </keywords>
+  <releases>
+    <release version="1.0.15" date="2026-11-09"/>
+  </releases>
+</component>

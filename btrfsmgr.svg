@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <rect x="2" y="2" width="124" height="124" rx="28" fill="#24513C"/>
+  <!-- tronc -->
+  <path d="M64 100 V58" stroke="#FFFFFF" stroke-width="11" stroke-linecap="round"/>
+  <!-- branches -->
+  <path d="M64 72 L42 52" stroke="#FFFFFF" stroke-width="10" stroke-linecap="round"/>
+  <path d="M64 72 L86 52" stroke="#FFFFFF" stroke-width="10" stroke-linecap="round"/>
+  <!-- noeuds (B-tree / sous-volumes) -->
+  <circle cx="64" cy="34" r="14" fill="#8FD6A8"/>
+  <circle cx="40" cy="44" r="11" fill="#8FD6A8"/>
+  <circle cx="88" cy="44" r="11" fill="#8FD6A8"/>
+  <!-- base = socle du volume -->
+  <rect x="46" y="100" width="36" height="10" rx="5" fill="#8FD6A8"/>
+</svg>
