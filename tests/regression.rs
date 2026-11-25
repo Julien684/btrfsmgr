@@ -170,12 +170,13 @@ Unit=btrfsmgr-snap-root-snapshots-daily.service\n\n[Install]\nWantedBy=timers.ta
         "",
         7,
         true,
-        7,
+        // boot_delay est en SECONDES : 420 s = 7 min
+        420,
         true,
         "/usr/local/bin/btrfsmgr-snap.sh",
     );
     assert!(svc.contains("ExecStart=/usr/local/bin/btrfsmgr-snap.sh / snapshots daily-%%Y%%m%%d-%%H%%M%%S 7 1"));
-    assert!(tmr.contains("OnBootSec=7min"));
+    assert!(tmr.contains("OnBootSec=420s"));
     assert_eq!(
         plan,
         "Au démarrage (7 min après le boot) — un seul instantané par jour"

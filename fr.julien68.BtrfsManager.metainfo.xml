@@ -8,7 +8,7 @@
   <summary>BTRFS snapshot manager TUI - create, list, restore, and automate BTRFS subvolume snapshots</summary>
   <summary xml:lang="fr">Gestionnaire d'instantanés BTRFS en TUI — créer, lister, restaurer et automatiser les instantanés de sous-volumes BTRFS</summary>
   <launchable type="desktop-id">btrfsmgr.desktop</launchable>
-  <url type="homepage">https://github.com/Julien684/btrfsmgr</url>
+  <url type="homepage">https://depoa.julien68.fr/Linuxon/btrfsmgr</url>
   <content_rating type="oars-1.1"/>
   <description>
     <p>btrfsmgr is a TUI tool for managing BTRFS subvolume snapshots on Linux. It supports creating, listing, restoring, and deleting snapshots; scheduling automatic snapshots via systemd timers with a retention policy; and generating boot entries (GRUB / systemd-boot) so you can boot directly into a snapshot. Restore is a CoW swap (two renames) - no data is copied. Written in Rust (single binary, no Python dependency). Requires btrfs-progs and systemd. Unofficial; not affiliated with Solus or the BTRFS project.</p>
@@ -26,10 +26,11 @@
   </keywords>
   <screenshots>
     <screenshot type="default">
-      <image type="source">https://raw.githubusercontent.com/Julien684/btrfsmgr/main/screenshot.png</image>
+      <image type="source">https://depoa.julien68.fr/Linuxon/btrfsmgr/raw/branch/main/screenshot.png</image>
     </screenshot>
   </screenshots>
   <releases>
+    <release version="1.0.16" date="2026-11-25"/>
     <release version="1.0.15" date="2026-11-14"/>
   </releases>
 </component>

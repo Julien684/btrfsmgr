@@ -173,18 +173,18 @@ prune_snapshots "$ROOT" "$SNAPDIR" "$KEEP"
 # No-op silencieux si le chargeur n'est pas systemd-boot.
 _bm_sync() {
     local b
-    for b in $(command -v btrfsmgr) /bin/btrfsmgr /usr/local/bin/btrfsmgr; do
+    # Tous les candidats (TUI puis GUI). On n'abandonne PAS au premier binaire
+    # trouvé : un btrfsmgr d'une version antérieure (sans sous-commande `sync`)
+    # échoue, et le repli sur le binaire GUI doit alors prendre le relais.
+    # Un échec total est signalé dans le journal du service au lieu de passer
+    # inaperçu.
+    for b in $(command -v btrfsmgr) /bin/btrfsmgr /usr/local/bin/btrfsmgr \
+             $(command -v btrfsmgr-gui) /bin/btrfsmgr-gui /usr/local/bin/btrfsmgr-gui; do
         [[ -x "$b" ]] || continue
-        "$b" sync "$ROOT" --snapdir "$SNAPDIR" || true
-        return 0
+        "$b" sync "$ROOT" --snapdir "$SNAPDIR" && return 0
+        echo "[btrfsmgr-snap] sync via $b en échec, essai suivant" >&2
     done
-    # Paquet GUI seul : il ne fournit plus /usr/bin/btrfsmgr, mais son
-    # binaire expose la même sous-commande « sync » en mode headless.
-    for b in $(command -v btrfsmgr-gui) /bin/btrfsmgr-gui /usr/local/bin/btrfsmgr-gui; do
-        [[ -x "$b" ]] || continue
-        "$b" sync "$ROOT" --snapdir "$SNAPDIR" || true
-        return 0
-    done
+    echo "[btrfsmgr-snap] ATTENTION: entrées de boot non synchronisées (aucun binaire utilisable)" >&2
     return 0
 }
 _bm_sync

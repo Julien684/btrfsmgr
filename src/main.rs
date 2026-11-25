@@ -138,9 +138,21 @@ fn main() {
             }
         }
         "sync" => {
-            sync_bootloader_entries(&root, &snapdir, true);
+            // Réécrit le script d'instantané (écriture atomique) : une machine
+            // dont l'automatisation tourne encore avec une ancienne copie
+            // récupère le correctif sans rouvrir l'interface.
+            if is_root() {
+                let _ = install_snap_script();
+            }
+            let outcome = sync_bootloader_entries_status(&root, &snapdir, true);
             release_boot_mount();
-            0
+            match outcome {
+                SyncOutcome::BootUnavailable => {
+                    eprintln!("btrfsmgr: /boot inaccessible — entrées de boot non synchronisées");
+                    3
+                }
+                _ => 0,
+            }
         }
         "delete-snap" => {
             if !is_root() {

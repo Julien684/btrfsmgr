@@ -842,7 +842,9 @@ impl Tui {
             &schedule,
             keep,
             boot,
-            boot_delay,
+            // La saisie est en minutes ; le cœur attend des SECONDES
+            // (OnBootSec=NNNs).
+            delay_to_seconds(boot_delay, "minutes"),
             once_per_day,
         );
         // Créer une automatisation doit aussi mettre le menu de démarrage à

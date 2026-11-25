@@ -26,13 +26,13 @@ SRC_DIR = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(".")
 OUT_DIR = Path(sys.argv[2]) if len(sys.argv) > 2 else SRC_DIR
 
 PACKAGE_NAME   = "btrfsmgr"
-VERSION        = "1.0.15"   # must match VERSION in btrfsmgr.py
-RELEASE        = 17  # bump on every republish with the same VERSION — eopkg caches by FILENAME, not by content hash; same name = stale cache
+VERSION        = "1.0.16"   # must match VERSION in btrfsmgr.py
+RELEASE        = 18  # bump on every republish with the same VERSION — eopkg caches by FILENAME, not by content hash; same name = stale cache
 DIST_RELEASE   = 1
 ARCH           = "x86_64"
 DIST_NAME      = "Solus"
 BUILD_HOST     = "solus-local"
-HOME_PAGE      = "https://github.com/Julien684/btrfsmgr"
+HOME_PAGE      = "https://depoa.julien68.fr/Linuxon/btrfsmgr"
 PACKAGER_NAME  = "Julien"
 PACKAGER_EMAIL = "julien_solus@use.startmail.com"
 PART_OF        = "system.utilities"
